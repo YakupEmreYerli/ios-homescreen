@@ -1,0 +1,49 @@
+# Example ios-homescreen layout, using Apple's stock apps.
+#
+# Start from your own phone instead of this file:
+#   ios-homescreen read
+#   ios-homescreen export -o layout.toml
+#
+# The widget, web clip and web app ids below are placeholders. Real ids come from
+# your phone and are already filled in by `export`.
+
+[dock]
+items = ["Phone", "Safari", "Messages", "Camera"]
+
+# Page 1: 21 of 24 cells (the medium widget takes 8)
+[[pages]]
+items = [
+  { type = "widget", id = "6F1D3A52-0000-4000-8000-000000000001" },  # Weather, medium
+  "com.apple.mobilecal",        # Calendar, by bundle id
+  "com.apple.mobileslideshow",  # Photos
+  "Mail",                       # or by the name shown under the icon
+  "Maps",
+  "Notes",
+  "Reminders",
+  "Clock",
+  "Settings",
+  { type = "folder", name = "Utilities", items = [
+    "Calculator",
+    "Voice Memos",
+    "Find My",
+    "Files",
+  ] },
+  { type = "folder", name = "Media", pages = [
+    ["Music", "Podcasts", "TV"],
+    ["Books"],
+  ] },
+  "App Store",
+  { type = "webclip", id = "0A1B2C3D4E5F40718293A4B5C6D7E8F9" },  # a Safari bookmark
+  { type = "webapp", id = "9E8D7C6B-0000-4000-8000-000000000002" },  # a Safari web app
+]
+
+# Page 2
+[[pages]]
+items = [
+  { type = "widget", id = "6F1D3A52-0000-4000-8000-000000000003" },  # Calendar, small
+  "Health",
+  "Wallet",
+  "com.apple.shortcuts",  # Shortcuts
+]
+
+# Every installed app that is not listed above goes to the App Library.
