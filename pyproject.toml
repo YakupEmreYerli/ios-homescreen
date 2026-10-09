@@ -1,0 +1,70 @@
+[project]
+name = "ios-homescreen"
+dynamic = ["version"]
+description = "Read, plan and safely rewrite an iPhone home screen layout from Linux, over USB or Wi-Fi."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Yakup Emre Yerli", email = "yakupemreyerli0@gmail.com" }]
+keywords = ["iphone", "ios", "home-screen", "springboard", "usbmuxd", "pymobiledevice3"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Utilities",
+]
+dependencies = [
+  # Exact pin on purpose: the tool depends on pymobiledevice3 internals (raw service
+  # send/recv, lockdown over TCP, Bonjour browsing) that were verified on a real device
+  # with this version. See CONTRIBUTING.md before bumping it.
+  "pymobiledevice3==11.12.5",
+]
+
+[project.optional-dependencies]
+# Reserved for the planned browser UI (`ios-homescreen ui`); no web dependencies yet.
+ui = []
+
+[project.urls]
+Homepage = "https://github.com/YakupEmreYerli/ios-homescreen"
+Issues = "https://github.com/YakupEmreYerli/ios-homescreen/issues"
+
+[project.scripts]
+ios-homescreen = "ios_homescreen.cli:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "ruff>=0.15",
+]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/ios_homescreen/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ios_homescreen"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF", "C4", "PT"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]
