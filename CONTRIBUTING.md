@@ -33,7 +33,7 @@ CI runs the tests on Python 3.11, 3.12 and 3.13. To try another version locally:
 | `model.py` | JSON view of a read for a UI, and back to a layout document |
 | `workflow.py` | Backup, drift check, timed write, verify by re-reading, rollback |
 | `device.py` | The only code that talks to SpringBoard and Installation Proxy; every call has a time limit |
-| `transport.py` | USB or network connection, pair records, Bonjour matching |
+| `transport.py` | USB connection, or Wi-Fi through RemotePairing and pymobiledevice3's userspace tunnel |
 | `api.py` | The Python API; no printing, progress through `Event` callbacks |
 | `cli.py` | argparse and printing on top of `api.py` |
 
@@ -48,6 +48,8 @@ No test may talk to a real device, usbmuxd or the network. Device behaviour is s
   24 cells, and a write can go unanswered or be ignored. A new safety rule needs a test against it.
 - `tests/samples.py` builds a realistic home screen from Apple stock apps and `com.example.*`
   placeholders. Never commit data read from your own phone, not even as a fixture.
+- `FakeWifiBackend` in `tests/fakes.py` stands in for the USB lockdown, the RemotePairing
+  records, the network lookup and the Wi-Fi tunnel.
 - `tests/test_pymobiledevice3_contract.py` checks the pymobiledevice3 functions we rely on
   (imports only).
 
@@ -84,16 +86,33 @@ alternative on a device.
 - Writes need `--yes`, and without it the command must not even connect. Validate input files
   before connecting.
 - Import pymobiledevice3 lazily, inside functions. `--help` and the tests must not need it.
-- Over TCP, pass the pair record to `create_using_tcp` yourself. pymobiledevice3 would look it
-  up by host name and find nothing. Never start pairing over Wi-Fi (`autopair=False`).
-- usbmuxd's pair record directory also holds files that are not pair records, such as
-  `SystemConfiguration.plist`; skip them.
+- Wi-Fi uses RemotePairing, not lockdown over TCP. On iOS 17 and later the phone answers on
+  port 62078 (`_apple-mobdev2._tcp`) and even validates the pairing, but closes every service
+  on the first request. The `_apple-mobdev2` answer also carries the private, changing Wi-Fi
+  MAC address, so matching it against the pair record never worked.
+- The RemotePairing record is made over USB with `RemotePairingLockdownService` (promptless,
+  since the computer is trusted). The phone closes the channel when pairing completes; that
+  shows up as `RemotePairingCompletedError` and means success. Records without the phone's
+  `peer_alt_irk` (made by older pymobiledevice3 versions) cannot be matched on the network;
+  `wifi enable` replaces them.
+- The Wi-Fi session is pymobiledevice3's `UserspaceRsdTunnel` fed with the service that
+  `get_remote_pairing_tunnel_services` found. The tunnel asks a module function for its
+  provider; `transport.py` swaps that function only for the length of `aopen()` and puts it
+  back. Only one userspace tunnel can exist per process, so close a Wi-Fi device before
+  opening the next one (the browser editor runs one job at a time for this reason).
+- Web clips and Safari web apps cannot be removed by `setIconState`: SpringBoard puts a
+  left-out web clip back on a new last page (seen on iOS 27), so verification fails and the
+  write is rolled back. The planner refuses such layouts with `not_removable`. Widgets can be
+  removed.
+- `userSelectedElementIdentifier` is not part of the layout comparison: SpringBoard drops it
+  on a write and Smart Rotate changes it on its own.
 
 ## pymobiledevice3 version
 
-The dependency is pinned exactly (`pymobiledevice3==11.12.5`) because the tool uses parts of
-it that are not a stable API (the raw service connection, lockdown over TCP, Bonjour
-browsing) and that version was checked on real phones. To bump it:
+The dependency is pinned exactly (`pymobiledevice3==11.26.0`) because the tool uses parts of
+it that are not a stable API (the raw service connection, RemotePairing over USB, the
+RemotePairing Bonjour lookup and the userspace tunnel's provider hook) and that version was
+checked on real phones. To bump it:
 
 1. Change the pin and run `uv lock`.
 2. Run the tests, including `tests/test_pymobiledevice3_contract.py`.

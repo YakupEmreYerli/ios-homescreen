@@ -7,7 +7,16 @@ from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any
 
-from ios_homescreen.state import PAGE_CELLS, cell_count, split_state, visible_apps
+from ios_homescreen.state import (
+    PAGE_CELLS,
+    cell_count,
+    is_folder,
+    item_id,
+    item_kind,
+    iter_items,
+    split_state,
+    visible_apps,
+)
 
 
 class FakeSpringBoard:
@@ -18,6 +27,8 @@ class FakeSpringBoard:
     * A dictionary write with ``ignored`` leaves those apps in the App Library.
     * Folders written with ``iconType: folder`` instead of ``listType: folder`` vanish.
     * Items beyond 24 cells spill onto a new page.
+    * Web clips and web apps that a write leaves out come back on a new last page
+      (seen on iOS 27: a write cannot remove them).
     * Optionally the write never gets a reply, or is silently ignored.
     """
 
@@ -115,6 +126,16 @@ class FakeSpringBoard:
                 pages[-1].extend(
                     {"bundleIdentifier": ident, "displayIdentifier": ident} for ident in missing
                 )
+            written = {item_id(item) for item in iter_items([dock, *pages]) if not is_folder(item)}
+            stuck = [
+                deepcopy(item)
+                for item in iter_items(self._state)
+                if not is_folder(item)
+                and item_kind(item) in {"webclip", "webapp"}
+                and item_id(item) not in written
+            ]
+            if stuck:
+                pages.append(stuck)
             self._state = [self._kept(dock), *self._reflow(pages)]
         if self.no_reply:
             await asyncio.Event().wait()
@@ -149,3 +170,70 @@ def opener_for(device: Any, seen: list[Any] | None = None):
 
 async def must_not_connect(transport: Any) -> Any:
     raise AssertionError("the device must not be contacted")
+
+
+class FakeWifiBackend:
+    """Stands in for the pymobiledevice3 backend: USB lockdown, RemotePairing records,
+    the network lookup and the Wi-Fi tunnel. Nothing leaves the process."""
+
+    def __init__(
+        self,
+        records=(),
+        *,
+        home=None,
+        answering: bool = True,
+        address: str = "192.0.2.7",
+        pair_udid: str = "00008120-000A1B2C3D4E5F60",
+    ):
+        from ios_homescreen.transport import RemoteRecord
+
+        self._record = RemoteRecord
+        self.records = list(records)
+        self.answering = answering
+        self.address = address
+        self.calls: list[tuple] = []
+        self.paired: list = []
+        self.closed = 0
+        self.home = home
+        self.pair_udid = pair_udid
+
+    async def usb(self, udid, pair_timeout):
+        self.calls.append(("usb", udid))
+        return FakeLockdown()
+
+    async def wifi(self, udid, discovery_timeout):
+        from ios_homescreen.transport import Link, TransportError
+
+        self.calls.append(("wifi", udid, discovery_timeout))
+        if not self.answering:
+            raise TransportError("the iPhone did not answer", code="not_advertising")
+
+        async def close():
+            self.closed += 1
+
+        return Link(FakeLockdown(), close, kind="wifi", address=self.address)
+
+    def remote_records(self):
+        return list(self.records)
+
+    async def pair_remote(self, lockdown):
+        self.paired.append(lockdown)
+        path = self.home / f"remote_{self.pair_udid}.plist"
+        path.write_bytes(b"record")
+        # Same file name as an old record: it replaces it, as on disk.
+        self.records = [r for r in self.records if r.udid != self.pair_udid]
+        self.records.append(self._record(self.pair_udid, path, True))
+
+    async def reachable(self, udid, discovery_timeout):
+        self.calls.append(("reachable", udid))
+        return self.address if self.answering else None
+
+
+class FakeLockdown:
+    def __init__(self):
+        self.paired = True
+        self.closed = False
+        self.all_values = {"DeviceName": "Test iPhone", "UniqueDeviceID": "UDID-1"}
+
+    async def close(self):
+        self.closed = True

@@ -24,12 +24,16 @@ dependencies = [
   # Exact pin on purpose: the tool depends on pymobiledevice3 internals (raw service
   # send/recv, lockdown over TCP, Bonjour browsing) that were verified on a real device
   # with this version. See CONTRIBUTING.md before bumping it.
-  "pymobiledevice3==11.12.5",
+  "pymobiledevice3==11.26.0",
 ]
 
 [project.optional-dependencies]
-# Reserved for the planned browser UI (`ios-homescreen ui`); no web dependencies yet.
-ui = []
+# The browser UI (`ios-homescreen ui`). pymobiledevice3 already pulls both in; they are
+# listed here so the UI keeps working if it ever stops doing so.
+ui = [
+  "starlette>=0.40",
+  "uvicorn>=0.30",
+]
 
 [project.urls]
 Homepage = "https://github.com/YakupEmreYerli/ios-homescreen"
@@ -40,6 +44,7 @@ ios-homescreen = "ios_homescreen.cli:main"
 
 [dependency-groups]
 dev = [
+  "httpx2>=2.13",
   "pytest>=8.3",
   "ruff>=0.15",
 ]

@@ -311,7 +311,8 @@ def _canonical_item(item: Any) -> Any:
             item.get("uniqueIdentifier"),
             item.get("widgetIdentifier"),
             item.get("containerBundleIdentifier"),
-            item.get("userSelectedElementIdentifier"),
+            # userSelectedElementIdentifier is left out: SpringBoard drops it on
+            # setIconState (seen on iOS 27.0.1), so a re-read never matches it.
             _widget_elements(item),
         )
     return (item_kind(item), item_id(item))

@@ -31,13 +31,14 @@ phone does not end up with the layout you asked for.
 - Shows what will move, what goes to the App Library and what comes back before you write.
 - Writes only with an explicit `--yes`, after a backup, and checks the result by reading the
   phone again. If the check fails, the backup is written back.
-- Works over USB, or over Wi-Fi once the phone allows it.
+- Works over USB, or over Wi-Fi (iOS 17 and later) after a one-time setup over USB. Neither
+  needs root or Developer Mode.
 - Keeps reads, backups and plans in `~/.local/share/ios-homescreen`, not in the current directory.
 - Can be used from Python: the CLI is a thin layer over `ios_homescreen.api`.
 
 ## Requirements
 
-- Linux. The pair record path for macOS is built in but untested.
+- Linux. macOS may work but has not been tested.
 - Python 3.11 or newer.
 - `usbmuxd`, installed and running. Most distributions ship it as `usbmuxd`
   (`sudo pacman -S usbmuxd`, `sudo apt install usbmuxd`, `sudo dnf install usbmuxd`).
@@ -100,7 +101,7 @@ ios-homescreen restore ~/.local/share/ios-homescreen/backups/backup-20261010-101
 | `apply PLAN --yes` | Backs up, writes the plan, verifies it and rolls back on failure | Writes |
 | `restore BACKUP --yes` | Writes a backup or read snapshot back, with the same safety steps | Writes |
 | `diff BEFORE AFTER` | Compares two saved layouts (reads, backups, plans, or plist/JSON state dumps) | No |
-| `wifi status\|enable\|disable` | Shows or changes whether the phone accepts Wi-Fi connections | Yes |
+| `wifi status\|enable\|disable` | Sets up, checks or turns off Wi-Fi access to the phone | Yes |
 
 Options for `export` and `plan`: `-o/--output FILE`, and `--allow-removal` for `plan` (see the
 layout reference). `read` takes `-o/--output DIR`. `apply` takes `--force` (see the safety model).
@@ -111,10 +112,8 @@ Connection options, for `read`, `apply`, `restore` and `wifi`:
 | Option | Meaning |
 | --- | --- |
 | *(none)* | USB through usbmuxd |
-| `--wifi` | Network; finds the phone with Bonjour |
-| `--host ADDRESS` | Network, straight to this IP address or host name |
+| `--wifi` | Wi-Fi (iOS 17 or later); run `wifi enable` over USB once first |
 | `--udid UDID` | Pick a device when several are connected or paired |
-| `--pair-records DIR` | Where usbmuxd keeps pair records (default `/var/lib/lockdown`) |
 | `--discovery-timeout SECONDS` | How long to listen for Bonjour answers (default 5) |
 | `--connect-timeout SECONDS` | Time limit for opening the connection (default 30) |
 
@@ -166,8 +165,8 @@ every item.
 | App | `"com.apple.Maps"` or `"Maps"` | A bundle id, or the app's name if only one app has it. `{ type = "app", id = "com.apple.Maps" }` also works and takes ids only. Any installed app can be added, including apps that are only in the App Library. |
 | Folder | `{ type = "folder", name = "Work", items = [...] }` | `pages = [[...], [...]]` instead of `items` for a folder with several pages. Holds apps, web clips and web apps. |
 | Widget or widget stack | `{ type = "widget", id = "..." }` | Small 4 cells, medium 8, large 16. Not allowed in the dock or in folders. |
-| Web clip | `{ type = "webclip", id = "..." }` | A bookmark added with Add to Home Screen. |
-| Safari web app | `{ type = "webapp", id = "..." }` | A site added with Add to Home Screen and "Open as Web App" (iOS 26 and later). It has Safari's bundle id and its own id; it is a separate item from Safari. |
+| Web clip | `{ type = "webclip", id = "..." }` | A bookmark added with Add to Home Screen. Can be moved, not removed (see below). |
+| Safari web app | `{ type = "webapp", id = "..." }` | A site added with Add to Home Screen and "Open as Web App" (iOS 26 and later). It has Safari's bundle id and its own id; it is a separate item from Safari. Can be moved, not removed. |
 
 Rules the planner enforces:
 
@@ -175,10 +174,14 @@ Rules the planner enforces:
   takes one.
 - Each item appears once. Two widgets from the same app are different items with different ids.
 - Folders need a name and at least one item, and cannot contain folders or widgets.
-- Widgets, web clips and web apps can be moved or removed, but a layout file cannot create
-  them: they are referenced by the id they had in the read, and the planner copies the
-  phone's own data for them unchanged. Leaving one out is an error unless you pass
-  `plan --allow-removal`.
+- Widgets, web clips and web apps can be moved, but a layout file cannot create them: they
+  are referenced by the id they had in the read, and the planner copies the phone's own data
+  for them unchanged. Leaving out a widget is an error unless you pass `plan --allow-removal`.
+- Web clips and Safari web apps cannot be removed by a write at all. When a written layout
+  leaves one out, the phone puts it back on a new last page, the check after writing fails
+  and the backup is restored. So the planner refuses such a layout (code `not_removable`),
+  even with `--allow-removal`. Delete them on the phone (touch and hold, then Delete
+  Bookmark), then `read` again.
 - Every installed app that is not in the layout goes to the App Library.
 - Unknown keys are errors, so a typo such as `itmes` does not silently empty a page.
 
@@ -217,28 +220,33 @@ dates and binary data that JSON would lose.
 
 ## Wi-Fi
 
-The phone accepts lockdown connections over the network once `EnableWifiConnections` is on.
-Turn it on once, over USB:
+Wi-Fi needs iOS 17 or later. Set it up once, with the phone connected over USB:
 
 ```bash
-ios-homescreen wifi enable     # over USB
-ios-homescreen wifi status     # shows the setting and the pair record that Wi-Fi will use
+ios-homescreen wifi enable     # over USB, once
+ios-homescreen wifi status     # the setting, the pairing, and whether the phone answers on Wi-Fi
 ```
 
+`wifi enable` turns on the phone's Wi-Fi connections setting and pairs this computer for
+Wi-Fi with RemotePairing, the mechanism Xcode uses for wireless devices. The computer is
+already trusted over USB, so the phone shows no prompt. Root, Developer Mode and a tunnel
+service are not needed: the connection runs through pymobiledevice3's userspace network stack
+inside the ios-homescreen process.
+
 After that, add `--wifi` to `read`, `apply` or `restore`. The phone must be on the same
-network as the computer, awake and unlocked.
+network as the computer, awake and unlocked. ios-homescreen looks for it with Bonjour
+(`_remotepairing._tcp`) for `--discovery-timeout` seconds and recognises it by the pairing,
+not by its address (iOS uses private, changing Wi-Fi addresses). If this computer is paired
+with several phones, pass `--udid`.
 
-`--wifi` listens for `_apple-mobdev2._tcp` Bonjour answers for `--discovery-timeout`
-seconds. Each paired phone answers with its Wi-Fi MAC address, and ios-homescreen matches it
-against the `WiFiMACAddress` in usbmuxd's pair records (`/var/lib/lockdown/<UDID>.plist` on
-Linux). The matching record is what lets it open a session without the cable. If more than
-one paired phone answers, pass `--udid`. If Bonjour does not get through (some routers block
-multicast), connect directly with `--host 192.168.1.23`; the IP address is in Settings >
-Wi-Fi > (i) on the phone.
+The pairing is a file kept by pymobiledevice3: `~/.local/share/pymobiledevice3/remote_<UDID>.plist`,
+or `~/.pymobiledevice3/` if that folder already exists. It holds the key that lets this
+computer talk to the phone; ios-homescreen never copies or sends it. `wifi disable` turns the
+phone's setting off, and `wifi disable --forget` also deletes the pairing file.
 
-Pair records contain the private key that lets a computer talk to your phone.
-ios-homescreen only reads them; it never copies or sends them. Use `--pair-records` or
-`IOS_HOMESCREEN_PAIR_RECORDS` if yours are elsewhere. `wifi disable` turns network access off.
+The older way of reaching a phone over the network, lockdown on port 62078 found as
+`_apple-mobdev2._tcp`, is not used: current iOS versions accept that connection but close
+every service on the first request.
 
 ## Files and environment
 
@@ -246,7 +254,7 @@ ios-homescreen only reads them; it never copies or sends them. Use `--pair-recor
 | --- | --- | --- |
 | Reads, backups, plans | `$XDG_DATA_HOME/ios-homescreen`, or `~/.local/share/ios-homescreen` | `--data-dir`, `IOS_HOMESCREEN_DATA_DIR` |
 | App icon cache (Python API) | `$XDG_CACHE_HOME/ios-homescreen`, or `~/.cache/ios-homescreen` | `IOS_HOMESCREEN_CACHE_DIR` |
-| usbmuxd pair records | `/var/lib/lockdown` | `--pair-records`, `IOS_HOMESCREEN_PAIR_RECORDS` |
+| Wi-Fi pairing (pymobiledevice3) | `$XDG_DATA_HOME/pymobiledevice3`, or `~/.local/share/pymobiledevice3` | `XDG_DATA_HOME` |
 
 Inside the data directory: `reads/read-*.plist` with a `.txt` summary next to each,
 `backups/backup-*.plist` and `plans/plan-*.plist`. Nothing is written to the current
@@ -288,7 +296,12 @@ and machine-readable codes. `api.fetch_icons` returns app icons as PNG bytes.
   show pages.
 - The Today view and Lock Screen widgets are not part of the home screen layout and are out
   of scope.
-- Widgets, web clips and web apps can be moved or removed but not created.
+- Widgets can be moved or removed but not created. Web clips and Safari web apps can only be
+  moved; delete them on the phone.
+- Writing a layout can put widgets where you chose what they show, such as a stack's selected
+  widget, back to their default choice: SpringBoard drops that choice on a write (seen on
+  iOS 27). The check after writing ignores it for that reason.
+- Wi-Fi needs iOS 17 or later.
 - Page capacity uses the iPhone grid (6 by 4). iPads have not been tested.
 - The layout format is Apple's and undocumented, and an iOS update can change it. Run `read`
   first after an update; the backup and rollback are there for the case where it changes.
@@ -308,14 +321,13 @@ reconnect the phone.
 computer yet. Unlock it, tap **Trust This Computer**, enter the passcode and run the command
 again.
 
-`no paired device answered on the network`: check that the phone and the computer are on the
-same network, that the phone is awake and unlocked, and that `wifi status` over USB shows
-Wi-Fi connections as enabled. Guest networks and client isolation block the phone; firewalls
-must allow mDNS (UDP 5353). `--host` skips discovery.
+`the iPhone did not answer on the network`: check that the phone and the computer are on the
+same network and that the phone is awake and unlocked; `wifi status` over USB shows whether it
+answers. Guest networks and client isolation keep the two apart, and firewalls must allow mDNS
+(UDP 5353).
 
-`cannot read /var/lib/lockdown/...`: some distributions make pair records readable by root
-only. Copy your phone's record to a private directory (`sudo cp`, then `chown` and
-`chmod 600`) and pass it with `--pair-records`.
+`this computer has no Wi-Fi pairing yet`, or a pairing made by an older pymobiledevice3: run
+`wifi enable` over USB again.
 
 `the device layout changed since the read`: the phone was edited after your `read`. Run
 `read` again and plan again, or use `--force` if you are sure.
@@ -336,8 +348,8 @@ The dictionary payload with an `ignored` list comes from what
 helped too. No code was copied from either project.
 
 Device communication goes through [pymobiledevice3](https://github.com/doronz88/pymobiledevice3),
-and USB access through [usbmuxd](https://github.com/libimobiledevice/usbmuxd) from the
-libimobiledevice project.
+including its RemotePairing support and userspace tunnel for Wi-Fi, and USB access through
+[usbmuxd](https://github.com/libimobiledevice/usbmuxd) from the libimobiledevice project.
 
 ## License
 

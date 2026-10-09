@@ -42,6 +42,17 @@ ITEM_TYPES = ("app", "folder", "widget", "webclip", "webapp")
 # Opaque items SpringBoard made; a layout can move them but not create them.
 UNRECREATABLE = frozenset({"widget", "webclip", "webapp"})
 
+# A write cannot remove these: SpringBoard puts a web clip that the payload leaves out
+# back on a new last page (seen on iOS 27), so verification fails and the write is
+# rolled back. Safari web apps are treated the same until shown otherwise. They have
+# to be deleted on the phone.
+NOT_REMOVABLE = frozenset({"webclip", "webapp"})
+
+_DELETE_ON_PHONE = {
+    "webclip": "touch and hold it, then Delete Bookmark",
+    "webapp": "touch and hold it, then delete it",
+}
+
 _ITEM_KEYS = {
     "app": {"type", "id"},
     "widget": {"type", "id"},
@@ -392,8 +403,23 @@ def _check_duplicates(dock: list[Any], pages: list[list[Any]]) -> list[LayoutIss
     ]
 
 
-def _specials(state: Any) -> set[str]:
-    return {item_id(item) for item in iter_items(state) if item_kind(item) in UNRECREATABLE}
+def _specials(state: Any) -> dict[str, Any]:
+    """Widgets, web clips and web apps by id."""
+    return {item_id(item): item for item in iter_items(state) if item_kind(item) in UNRECREATABLE}
+
+
+def _not_removable(ident: str, item: Any) -> LayoutIssue:
+    kind = item_kind(item)
+    label = "web clip" if kind == "webclip" else "web app"
+    name = item.get("displayName") if isinstance(item, Mapping) else None
+    named = f"{label} {name!r} ({ident})" if name else f"{label} {ident}"
+    return LayoutIssue(
+        "not_removable",
+        f"the layout leaves out the {named}. A {label} cannot be removed by writing a "
+        "layout: the iPhone puts it back. Keep it in the layout, or delete it on the "
+        f"iPhone ({_DELETE_ON_PHONE[kind]}) and read again",
+        details={"id": ident, "kind": kind, "name": str(name or "")},
+    )
 
 
 def plan_layout(
@@ -453,17 +479,25 @@ def plan_layout(
 
     draft = {"buttonBar": dock, "iconLists": pages, "ignored": []}
     source_state = read["state"]
-    removed = tuple(sorted(_specials(source_state) - _specials(draft)))
-    if removed and not allow_removal and not planner.issues:
-        planner.issues.append(
-            LayoutIssue(
-                "removal_not_allowed",
-                "the layout leaves out widgets, web clips or web apps that are on the "
-                "device: " + ", ".join(removed) + ". They cannot be recreated from a "
-                "layout file; pass --allow-removal to remove them anyway",
-                details={"ids": list(removed)},
-            )
+    before_specials, after_specials = _specials(source_state), _specials(draft)
+    missing = {i: x for i, x in sorted(before_specials.items()) if i not in after_specials}
+    removed = tuple(i for i, x in missing.items() if item_kind(x) not in NOT_REMOVABLE)
+    if not planner.issues:
+        # Only once everything resolved: an unresolved entry would look left out.
+        planner.issues.extend(
+            _not_removable(i, x) for i, x in missing.items() if item_kind(x) in NOT_REMOVABLE
         )
+        if removed and not allow_removal:
+            planner.issues.append(
+                LayoutIssue(
+                    "removal_not_allowed",
+                    "the layout leaves out widgets that are on the device: "
+                    + ", ".join(removed)
+                    + ". They cannot be recreated from a layout file; pass "
+                    "--allow-removal to remove them anyway",
+                    details={"ids": list(removed)},
+                )
+            )
     if planner.issues:
         raise LayoutError(planner.issues)
 
@@ -482,7 +516,7 @@ def plan_layout(
             diff_text(source_state, draft).rstrip(),
             f"To the App Library ({len(to_library)}): {', '.join(to_library) or 'none'}",
             f"To the home screen ({len(to_home)}): {', '.join(to_home) or 'none'}",
-            f"Removed widgets/web clips/web apps ({len(removed)}): {', '.join(removed) or 'none'}",
+            f"Removed widgets ({len(removed)}): {', '.join(removed) or 'none'}",
             f"Apps kept off the home screen (ignored): {len(payload['ignored'])}",
         ]
     )

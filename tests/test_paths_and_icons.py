@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from ios_homescreen.icons import IconCache, load_icons
-from ios_homescreen.paths import cache_dir, data_dir, default_pair_records_dir
+from ios_homescreen.paths import cache_dir, data_dir
 
 HOME = Path("/home/someone")
 
@@ -36,14 +36,6 @@ def test_data_dir_follows_xdg(env, expected):
 )
 def test_cache_dir_follows_xdg(env, expected):
     assert cache_dir(env, home=HOME) == expected
-
-
-def test_pair_record_directory_defaults_per_platform_and_can_be_overridden():
-    assert default_pair_records_dir({}, platform="linux") == Path("/var/lib/lockdown")
-    assert default_pair_records_dir({}, platform="darwin") == Path("/var/db/lockdown")
-    assert default_pair_records_dir(
-        {"IOS_HOMESCREEN_PAIR_RECORDS": "/tmp/records"}, platform="linux"
-    ) == Path("/tmp/records")
 
 
 def test_icon_cache_stores_by_identifier_and_refuses_unsafe_names(tmp_path):

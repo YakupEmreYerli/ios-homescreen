@@ -21,9 +21,10 @@ In scope:
 - Anything that makes ios-homescreen write to the phone without `--yes`, skip the backup,
   skip verification or rollback, or send a payload other than the validated
   `{buttonBar, iconLists, ignored}` dictionary.
-- Leaking or copying pair records. They contain the private key that lets a computer access
-  the phone. ios-homescreen reads them for Wi-Fi connections and must never write, copy or
-  send them anywhere.
+- Leaking or copying pairing records. They contain the private key that lets a computer
+  access the phone. ios-homescreen has pymobiledevice3 create the Wi-Fi (RemotePairing)
+  record on `wifi enable`, deletes it on `wifi disable --forget`, and otherwise only reads
+  it; it must never copy or send it anywhere.
 - Writing outside the data, cache or output paths the user chose, for example through a
   crafted file name, bundle id or layout file.
 - Crafted read, backup, plan or layout files that make the tool do something other than

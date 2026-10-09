@@ -7,14 +7,12 @@ directory, ``$XDG_DATA_HOME/ios-homescreen`` or ``~/.local/share/ios-homescreen`
 from __future__ import annotations
 
 import os
-import sys
 from collections.abc import Mapping
 from pathlib import Path
 
 APP_NAME = "ios-homescreen"
 DATA_DIR_ENV = "IOS_HOMESCREEN_DATA_DIR"
 CACHE_DIR_ENV = "IOS_HOMESCREEN_CACHE_DIR"
-PAIR_RECORDS_ENV = "IOS_HOMESCREEN_PAIR_RECORDS"
 
 READS = "reads"
 BACKUPS = "backups"
@@ -44,17 +42,3 @@ def cache_dir(env: Mapping[str, str] | None = None, *, home: Path | None = None)
     if xdg and Path(xdg).is_absolute():
         return Path(xdg) / APP_NAME
     return (home or Path.home()) / ".cache" / APP_NAME
-
-
-def default_pair_records_dir(
-    env: Mapping[str, str] | None = None, *, platform: str | None = None
-) -> Path:
-    """usbmuxd's pair record store (``/var/lib/lockdown`` on Linux)."""
-    env = os.environ if env is None else env
-    override = env.get(PAIR_RECORDS_ENV)
-    if override:
-        return Path(override).expanduser()
-    platform = sys.platform if platform is None else platform
-    if platform == "darwin":
-        return Path("/var/db/lockdown")
-    return Path("/var/lib/lockdown")

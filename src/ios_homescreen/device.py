@@ -12,7 +12,7 @@ from typing import Any
 
 from .events import EventSink, ignore
 from .state import StateError, validate_write_payload
-from .transport import Backend, Transport, close_quietly, connect
+from .transport import CLOSE_TIMEOUT, Backend, Transport, close_quietly, connect
 
 READ_TIMEOUT = 30.0
 SEND_TIMEOUT = 10.0
@@ -29,12 +29,19 @@ class DeviceError(RuntimeError):
 
 
 class Device:
-    """Home screen and Wi-Fi setting access on top of a lockdown client."""
+    """Home screen and Wi-Fi setting access on top of a lockdown client.
+
+    ``lockdown`` is a lockdown client (USB) or a RemoteServiceDiscovery session through
+    the Wi-Fi tunnel; the services work the same on both. ``close`` ends the connection
+    (the tunnel, for Wi-Fi); by default it closes ``lockdown``.
+    """
 
     def __init__(
         self,
         lockdown: Any,
         *,
+        close: Callable[[], Awaitable[Any]] | None = None,
+        transport: str = "usb",
         springboard_factory: Callable[[Any], Any] | None = None,
         installer_factory: Callable[[Any], Any] | None = None,
         read_timeout: float = READ_TIMEOUT,
@@ -42,6 +49,8 @@ class Device:
         reply_timeout: float = REPLY_TIMEOUT,
     ) -> None:
         self.lockdown = lockdown
+        self.transport = transport
+        self._close = close
         self._springboard_factory = springboard_factory or _springboard
         self._installer_factory = installer_factory or _installer
         self.read_timeout = read_timeout
@@ -200,7 +209,11 @@ class Device:
         )
 
     async def close(self) -> None:
-        await close_quietly(self.lockdown, self.reply_timeout)
+        if self._close is not None:
+            # Tearing a tunnel down takes longer than closing a socket.
+            await close_quietly(self._close, CLOSE_TIMEOUT)
+        elif hasattr(self.lockdown, "close"):
+            await close_quietly(self.lockdown.close, self.reply_timeout)
 
 
 def _springboard(lockdown: Any) -> Any:
@@ -219,5 +232,5 @@ async def open_device(
     transport: Transport, *, on_event: EventSink = ignore, backend: Backend | None = None
 ) -> Device:
     """Connect over ``transport`` and return a :class:`Device`. Close it when done."""
-    lockdown = await connect(transport, backend=backend, on_event=on_event)
-    return Device(lockdown)
+    link = await connect(transport, backend=backend, on_event=on_event)
+    return Device(link.provider, close=link.close, transport=link.kind)

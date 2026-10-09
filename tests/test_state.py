@@ -232,11 +232,10 @@ def test_layout_comparison_catches_order_changes():
     ("field", "value"),
     [
         ("gridSize", "large"),
-        ("userSelectedElementIdentifier", "e2"),
         ("elements", [{"uniqueIdentifier": "e2"}, {"uniqueIdentifier": "e1"}]),
     ],
 )
-def test_widget_size_stack_order_and_selection_are_part_of_the_layout(field, value):
+def test_widget_size_and_stack_order_are_part_of_the_layout(field, value):
     stack = {
         "iconType": "custom",
         "displayIdentifier": "stack",
@@ -249,6 +248,22 @@ def test_widget_size_stack_order_and_selection_are_part_of_the_layout(field, val
 
     assert not same_layout([[], [stack]], [[], [changed]])
     assert fingerprint([[], [stack]]) != fingerprint([[], [changed]])
+
+
+def test_widget_selection_is_not_part_of_the_layout():
+    # SpringBoard drops userSelectedElementIdentifier on write and Smart Rotate
+    # changes it on its own, so comparing it would fail every verification.
+    widget = {
+        "iconType": "custom",
+        "elementType": "widget",
+        "displayIdentifier": "w1",
+        "gridSize": "small",
+        "userSelectedElementIdentifier": "e1",
+    }
+    dropped = {k: v for k, v in widget.items() if k != "userSelectedElementIdentifier"}
+
+    assert same_layout([[], [widget]], [[], [dropped]])
+    assert fingerprint([[], [widget]]) == fingerprint([[], [dropped]])
 
 
 def _plan(**overrides):

@@ -33,14 +33,15 @@ telefon istediğiniz düzene gelmediyse yedeği kendiliğinden geri yazar.
 - Yazmadan önce neyin taşınacağını, neyin arşive gideceğini ve neyin ana ekrana döneceğini gösterir.
 - Yalnız açıkça `--yes` verildiğinde, yedekten sonra yazar ve sonucu telefonu yeniden okuyarak
   denetler. Tutmazsa yedeği geri yazar.
-- USB ile, telefon izin verdikten sonra da Wi-Fi ile çalışır.
+- USB ile çalışır; USB üzerinden bir kez kurduktan sonra Wi-Fi ile de (iOS 17 ve sonrası).
+  İkisi için de root ya da Geliştirici Modu gerekmez.
 - Okumaları, yedekleri ve planları çalışma klasörüne değil `~/.local/share/ios-homescreen`
   altına kaydeder.
 - Python'dan da kullanılabilir: komut satırı, `ios_homescreen.api` üzerine ince bir katman.
 
 ## Gereksinimler
 
-- Linux. macOS için eşleşme kaydı yolu tanımlı ama denenmedi.
+- Linux. macOS'ta çalışabilir ama denenmedi.
 - Python 3.11 ya da üstü.
 - Kurulu ve çalışan `usbmuxd`. Çoğu dağıtımda paketin adı `usbmuxd`
   (`sudo pacman -S usbmuxd`, `sudo apt install usbmuxd`, `sudo dnf install usbmuxd`).
@@ -103,7 +104,7 @@ ios-homescreen restore ~/.local/share/ios-homescreen/backups/backup-20261010-101
 | `apply PLAN --yes` | Yedek alır, planı yazar, doğrular, tutmazsa geri döner | Yazar |
 | `restore BACKUP --yes` | Bir yedeği ya da okumayı aynı güvenlik adımlarıyla geri yazar | Yazar |
 | `diff BEFORE AFTER` | Kayıtlı iki düzeni karşılaştırır (okuma, yedek, plan ya da plist/JSON döküm) | Hayır |
-| `wifi status\|enable\|disable` | Telefonun Wi-Fi bağlantısı kabul edip etmediğini gösterir ya da değiştirir | Evet |
+| `wifi status\|enable\|disable` | Telefona Wi-Fi erişimini kurar, denetler ya da kapatır | Evet |
 
 `export` ve `plan` için `-o/--output FILE`; `plan` için ayrıca `--allow-removal` (düzen dosyası
 bölümüne bakın). `read` için `-o/--output DIR`. `apply` için `--force` (güvenlik bölümüne bakın).
@@ -114,10 +115,8 @@ Bağlantı seçenekleri (`read`, `apply`, `restore`, `wifi`):
 | Seçenek | Anlamı |
 | --- | --- |
 | *(yok)* | usbmuxd üzerinden USB |
-| `--wifi` | Ağ; telefonu Bonjour ile bulur |
-| `--host ADDRESS` | Ağ; doğrudan bu IP adresine ya da ana makine adına |
+| `--wifi` | Wi-Fi (iOS 17 ve sonrası); önce bir kez USB üzerinden `wifi enable` çalıştırın |
 | `--udid UDID` | Birden çok cihaz bağlı ya da eşliyse birini seçer |
-| `--pair-records DIR` | usbmuxd eşleşme kayıtlarının yeri (varsayılan `/var/lib/lockdown`) |
 | `--discovery-timeout SECONDS` | Bonjour cevaplarının bekleneceği süre (varsayılan 5) |
 | `--connect-timeout SECONDS` | Bağlantı kurma süre sınırı (varsayılan 30) |
 
@@ -172,8 +171,8 @@ yorum olarak ekler.
 | Uygulama | `"com.apple.Maps"` ya da `"Maps"` | Paket kimliği ya da, o adda tek uygulama varsa, adı. `{ type = "app", id = "com.apple.Maps" }` de olur ve yalnız kimlik kabul eder. Yalnız Uygulama Arşivi'nde duranlar dahil kurulu her uygulama eklenebilir. |
 | Klasör | `{ type = "folder", name = "İş", items = [...] }` | Çok sayfalı klasör için `items` yerine `pages = [[...], [...]]`. İçine uygulama, web kısayolu ve web uygulaması konur. |
 | Widget ya da widget yığını | `{ type = "widget", id = "..." }` | Küçük 4 hücre, orta 8, büyük 16. Dock'a ve klasöre konamaz. |
-| Web kısayolu | `{ type = "webclip", id = "..." }` | Ana Ekrana Ekle ile eklenen yer imi. |
-| Safari web uygulaması | `{ type = "webapp", id = "..." }` | Ana Ekrana Ekle'de "Web Uygulaması Olarak Aç" seçilerek eklenen site (iOS 26 ve sonrası). Safari'nin paket kimliğini taşır ama kendi kimliği vardır; Safari'den ayrı bir öğedir. |
+| Web kısayolu | `{ type = "webclip", id = "..." }` | Ana Ekrana Ekle ile eklenen yer imi. Taşınabilir, kaldırılamaz (aşağıya bakın). |
+| Safari web uygulaması | `{ type = "webapp", id = "..." }` | Ana Ekrana Ekle'de "Web Uygulaması Olarak Aç" seçilerek eklenen site (iOS 26 ve sonrası). Safari'nin paket kimliğini taşır ama kendi kimliği vardır; Safari'den ayrı bir öğedir. Taşınabilir, kaldırılamaz. |
 
 Planlayıcının uyguladığı kurallar:
 
@@ -181,9 +180,14 @@ Planlayıcının uyguladığı kurallar:
   uygulaması birer hücre tutar.
 - Her öğe bir kez geçer. Aynı uygulamanın iki widget'ı, kimlikleri farklı iki ayrı öğedir.
 - Klasörün adı ve en az bir öğesi olmalı; içinde klasör ya da widget olamaz.
-- Widget, web kısayolu ve web uygulaması taşınabilir ya da kaldırılabilir, ama düzen dosyasıyla
-  yeni oluşturulamaz. Okumadaki kimlikleriyle anılırlar ve planlayıcı telefonun kendi verisini
-  olduğu gibi kopyalar. Birini düzene yazmazsanız `plan --allow-removal` vermedikçe hata alırsınız.
+- Widget, web kısayolu ve web uygulaması taşınabilir ama düzen dosyasıyla yeni oluşturulamaz.
+  Okumadaki kimlikleriyle anılırlar ve planlayıcı telefonun kendi verisini olduğu gibi kopyalar.
+  Bir widget'ı düzene yazmazsanız `plan --allow-removal` vermedikçe hata alırsınız.
+- Web kısayolları ve Safari web uygulamaları yazarak hiç kaldırılamaz. Yazılan düzende biri
+  eksikse telefon onu yeni bir son sayfaya geri koyuyor; yazmadan sonraki denetim tutmuyor ve
+  yedek geri yükleniyor. Bu yüzden planlayıcı böyle bir düzeni `--allow-removal` verilse de
+  reddeder (kod `not_removable`). Bunları telefonda silin (simgeye basılı tutun, Yer İşaretini
+  Sil), sonra yeniden `read` çalıştırın.
 - Düzende olmayan her kurulu uygulama Uygulama Arşivi'ne gider.
 - Bilinmeyen anahtar hata sayılır; `itmes` gibi bir yazım hatası bir sayfayı sessizce boşaltmaz.
 
@@ -222,28 +226,33 @@ kaybedeceği tarih ve ikili veri var.
 
 ## Wi-Fi
 
-Telefon, `EnableWifiConnections` açıldıktan sonra ağ üzerinden bağlantı kabul eder. Bunu bir
-kez, USB üzerinden açın:
+Wi-Fi için iOS 17 ya da sonrası gerekir. Telefon USB ile bağlıyken bir kez kurun:
 
 ```bash
-ios-homescreen wifi enable     # USB üzerinden
-ios-homescreen wifi status     # ayarı ve Wi-Fi'de kullanılacak eşleşme kaydını gösterir
+ios-homescreen wifi enable     # USB üzerinden, bir kez
+ios-homescreen wifi status     # ayar, eşleşme ve telefonun Wi-Fi'de cevap verip vermediği
 ```
 
-Bundan sonra `read`, `apply` ya da `restore` komutuna `--wifi` ekleyin. Telefon bilgisayarla
-aynı ağda, uyanık ve kilidi açık olmalı.
+`wifi enable` telefondaki Wi-Fi bağlantısı ayarını açar ve bu bilgisayarı Wi-Fi için
+RemotePairing ile eşler; Xcode kablosuz cihazlar için aynı yolu kullanır. Bilgisayar USB
+üzerinden zaten güvenilir olduğu için telefonda bir soru çıkmaz. Root, Geliştirici Modu ya da
+ayrı bir tünel servisi gerekmez: bağlantı, pymobiledevice3'ün ios-homescreen sürecinin içinde
+çalışan ağ yığınından geçer.
 
-`--wifi`, `--discovery-timeout` saniye boyunca `_apple-mobdev2._tcp` Bonjour cevaplarını dinler.
-Eşli her telefon Wi-Fi MAC adresiyle cevap verir; ios-homescreen bu adresi usbmuxd eşleşme
-kayıtlarındaki (Linux'ta `/var/lib/lockdown/<UDID>.plist`) `WiFiMACAddress` ile eşleştirir.
-Kablosuz oturum açmayı sağlayan, eşleşen bu kayıttır. Birden çok eşli telefon cevap verirse
-`--udid` verin. Bonjour geçmiyorsa (bazı modemler çoklu yayını engeller) `--host 192.168.1.23`
-ile doğrudan bağlanın; IP adresi telefonda Ayarlar > Wi-Fi > (i) altında yazar.
+Bundan sonra `read`, `apply` ya da `restore` komutuna `--wifi` ekleyin. Telefon
+bilgisayarla aynı ağda, uyanık ve kilidi açık olmalı. ios-homescreen telefonu
+`--discovery-timeout` saniye boyunca Bonjour ile (`_remotepairing._tcp`) arar ve adresinden
+değil eşleşmeden tanır; iOS özel ve değişen Wi-Fi adresleri kullanıyor. Bilgisayar birden çok
+telefonla eşliyse `--udid` verin.
 
-Eşleşme kayıtlarında, bir bilgisayarın telefonunuzla konuşmasını sağlayan özel anahtar bulunur.
-ios-homescreen bu kayıtları yalnız okur, hiçbir yere kopyalamaz ve göndermez. Kayıtlarınız başka
-yerdeyse `--pair-records` ya da `IOS_HOMESCREEN_PAIR_RECORDS` kullanın. `wifi disable` ağ
-erişimini kapatır.
+Eşleşme, pymobiledevice3'ün tuttuğu bir dosyadır: `~/.local/share/pymobiledevice3/remote_<UDID>.plist`,
+ya da bu klasör zaten varsa `~/.pymobiledevice3/`. İçinde bu bilgisayarın telefonla
+konuşmasını sağlayan anahtar var; ios-homescreen onu hiçbir yere kopyalamaz ve göndermez.
+`wifi disable` telefondaki ayarı kapatır, `wifi disable --forget` eşleşme dosyasını da siler.
+
+Telefona ağ üzerinden ulaşmanın eski yolu (62078 portundaki lockdown, `_apple-mobdev2._tcp`
+olarak bulunur) kullanılmıyor: güncel iOS sürümleri bu bağlantıyı kabul ediyor ama ilk istekte
+her servisi kapatıyor.
 
 ## Dosyalar ve ortam değişkenleri
 
@@ -251,7 +260,7 @@ erişimini kapatır.
 | --- | --- | --- |
 | Okumalar, yedekler, planlar | `$XDG_DATA_HOME/ios-homescreen` ya da `~/.local/share/ios-homescreen` | `--data-dir`, `IOS_HOMESCREEN_DATA_DIR` |
 | Uygulama simgesi önbelleği (Python API) | `$XDG_CACHE_HOME/ios-homescreen` ya da `~/.cache/ios-homescreen` | `IOS_HOMESCREEN_CACHE_DIR` |
-| usbmuxd eşleşme kayıtları | `/var/lib/lockdown` | `--pair-records`, `IOS_HOMESCREEN_PAIR_RECORDS` |
+| Wi-Fi eşleşmesi (pymobiledevice3) | `$XDG_DATA_HOME/pymobiledevice3` ya da `~/.local/share/pymobiledevice3` | `XDG_DATA_HOME` |
 
 Veri klasöründe `reads/read-*.plist` (her birinin yanında `.txt` özeti),
 `backups/backup-*.plist` ve `plans/plan-*.plist` bulunur. Siz bir yol vermedikçe çalışma
@@ -293,7 +302,12 @@ uygulama simgelerini PNG baytları olarak döndürür.
 - Protokolde gizli ana ekran sayfaları için bir ayar yok; ios-homescreen sayfa gizleyemez ya da
   gösteremez.
 - Bugün görünümü ve Kilitli Ekran widget'ları ana ekran düzeninin parçası değil, kapsam dışında.
-- Widget, web kısayolu ve web uygulaması taşınabilir ya da kaldırılabilir ama oluşturulamaz.
+- Widget taşınabilir ya da kaldırılabilir ama oluşturulamaz. Web kısayolu ve Safari web
+  uygulaması yalnız taşınabilir; onları telefonda silin.
+- Düzen yazınca, ne göstereceğini sizin seçtiğiniz widget'lar (örneğin bir yığında seçili
+  widget) varsayılan seçime dönebilir: SpringBoard yazma sırasında bu seçimi bırakıyor (iOS 27'de
+  görüldü). Yazmadan sonraki denetim de bu yüzden bu seçime bakmaz.
+- Wi-Fi için iOS 17 ya da sonrası gerekir.
 - Sayfa kapasitesi iPhone ızgarasına (6'ya 4) göre hesaplanır. iPad'de denenmedi.
 - Düzen biçimi Apple'ın ve belgelenmemiş; bir iOS güncellemesi onu değiştirebilir.
   Güncellemeden sonra önce `read` çalıştırın; biçim değişirse yedek ve geri dönüş bunun için var.
@@ -311,14 +325,13 @@ yeniden başlatın ve telefonu yeniden takın.
 İlk bağlantıda `Mux error -8` ya da bir eşleşme hatası: telefon bu bilgisayara henüz güvenmiyor.
 Kilidini açın, **Bu Bilgisayara Güven** deyin, parolayı girin ve komutu yeniden çalıştırın.
 
-`no paired device answered on the network`: telefonla bilgisayarın aynı ağda olduğuna, telefonun
-uyanık ve kilidinin açık olduğuna, USB üzerinden `wifi status` çıktısında Wi-Fi bağlantısının
-açık göründüğüne bakın. Misafir ağları ve istemci yalıtımı telefonu engeller; güvenlik duvarı
-mDNS'e (UDP 5353) izin vermeli. `--host` keşfi atlar.
+`the iPhone did not answer on the network`: telefonla bilgisayarın aynı ağda olduğuna, telefonun
+uyanık ve kilidinin açık olduğuna bakın; USB üzerinden `wifi status` telefonun cevap verip
+vermediğini gösterir. Misafir ağları ve istemci yalıtımı ikisini birbirinden ayırır; güvenlik
+duvarı mDNS'e (UDP 5353) izin vermeli.
 
-`cannot read /var/lib/lockdown/...`: bazı dağıtımlarda eşleşme kayıtlarını yalnız root okuyabilir.
-Telefonunuzun kaydını kendinize ait bir klasöre kopyalayın (`sudo cp`, ardından `chown` ve
-`chmod 600`) ve `--pair-records` ile gösterin.
+`this computer has no Wi-Fi pairing yet` ya da eski bir pymobiledevice3 sürümünün yaptığı
+eşleşme: USB üzerinden `wifi enable` komutunu yeniden çalıştırın.
 
 `the device layout changed since the read`: `read` komutundan sonra telefonda düzen değişmiş.
 Yeniden `read` ve `plan` çalıştırın; eminseniz `--force` kullanın.
@@ -339,9 +352,9 @@ projesinin 4 numaralı çekme isteğinin `setIconState` hakkında bulduklarına 
 [facebook/idb](https://github.com/facebook/idb) içindeki ana ekran biçimi notları da yol gösterdi.
 İki projeden de kod kopyalanmadı.
 
-Cihazla iletişim [pymobiledevice3](https://github.com/doronz88/pymobiledevice3), USB erişimi
-libimobiledevice projesinin [usbmuxd](https://github.com/libimobiledevice/usbmuxd) aracı
-üzerinden yürüyor.
+Cihazla iletişim [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) (Wi-Fi için
+RemotePairing desteği ve kullanıcı alanındaki tüneli dahil), USB erişimi libimobiledevice
+projesinin [usbmuxd](https://github.com/libimobiledevice/usbmuxd) aracı üzerinden yürüyor.
 
 ## Lisans
 

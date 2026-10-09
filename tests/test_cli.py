@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-import plistlib
 from pathlib import Path
 
 import pytest
 
 import samples
-from fakes import FakeSpringBoard, must_not_connect, opener_for
+from fakes import FakeSpringBoard, FakeWifiBackend, must_not_connect, opener_for
 from ios_homescreen import __version__
 from ios_homescreen.cli import main
 from ios_homescreen.state import fingerprint, load_plist, same_layout, save_plist
-from ios_homescreen.transport import Transport
+from ios_homescreen.transport import RemoteRecord, Transport
 
 UDID = "00008120-000A1B2C3D4E5F60"
 FAST = ["--verify-attempts", "2", "--verify-interval", "0", "--write-timeout", "1"]
@@ -22,7 +21,6 @@ def home(tmp_path, monkeypatch) -> Path:
     """An isolated XDG data dir; the working directory must stay empty."""
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     monkeypatch.delenv("IOS_HOMESCREEN_DATA_DIR", raising=False)
-    monkeypatch.delenv("IOS_HOMESCREEN_PAIR_RECORDS", raising=False)
     work = tmp_path / "work"
     work.mkdir()
     monkeypatch.chdir(work)
@@ -52,7 +50,7 @@ def test_device_commands_offer_usb_and_wifi_options(command, capsys):
         main([command, "--help"])
 
     text = capsys.readouterr().out
-    for flag in ("--wifi", "--host", "--udid", "--pair-records", "--discovery-timeout"):
+    for flag in ("--wifi", "--udid", "--discovery-timeout", "--connect-timeout"):
         assert flag in text
 
 
@@ -285,16 +283,14 @@ def test_transport_flags_reach_the_connection(home, tmp_path, monkeypatch):
         main([*base, *flags], open_device=opener_for(phone(), seen))
 
     run("--yes", "--wifi")
-    run("--yes", "--host", "192.168.1.20", "--udid", UDID, "--pair-records", str(tmp_path))
+    run("--yes", "--wifi", "--udid", UDID)
     run("--yes", "--wifi", "--discovery-timeout", "9", "--connect-timeout", "4")
+    run("--yes")
 
     assert seen[0] == Transport(wifi=True)
-    assert seen[1] == Transport(wifi=True, host="192.168.1.20", udid=UDID, pair_records=tmp_path)
+    assert seen[1] == Transport(wifi=True, udid=UDID)
     assert (seen[2].discovery_timeout, seen[2].connect_timeout) == (9, 4)
-
-    monkeypatch.setenv("IOS_HOMESCREEN_PAIR_RECORDS", str(tmp_path / "records"))
-    run("--yes")
-    assert seen[3] == Transport(pair_records=tmp_path / "records")
+    assert seen[3] == Transport()
     assert not seen[3].network
 
 
@@ -406,57 +402,71 @@ def test_diff_of_identical_layouts(tmp_path, capsys):
     assert capsys.readouterr().out == "No layout differences.\n"
 
 
-def _pair_record(directory: Path) -> Path:
-    directory.mkdir(exist_ok=True)
-    path = directory / f"{UDID}.plist"
-    path.write_bytes(
-        plistlib.dumps(
-            {"HostID": "H", "HostCertificate": b"c", "WiFiMACAddress": "a0:b1:c2:d3:e4:f5"}
-        )
-    )
-    return path
-
-
-def test_wifi_status_shows_the_setting_and_the_pair_record(home, tmp_path, capsys):
-    record = _pair_record(tmp_path / "records")
+def test_wifi_status_shows_the_setting_the_pairing_and_the_network(home, tmp_path, capsys):
+    record = tmp_path / f"remote_{UDID}.plist"
+    backend = FakeWifiBackend([RemoteRecord(UDID, record, True)])
     device = phone(wifi_enabled=True)
 
-    code = main(
-        ["wifi", "status", "--pair-records", str(tmp_path / "records")],
-        open_device=opener_for(device),
-    )
+    code = main(["wifi", "status"], open_device=opener_for(device), wifi_backend=backend)
 
     out = capsys.readouterr().out
     assert code == 0
-    assert "Wi-Fi connections: enabled" in out
-    assert "Wi-Fi MAC: a0:b1:c2:d3:e4:f5" in out
-    assert f"Pair record for network use: {record}" in out
+    assert "Wi-Fi connections setting: on" in out
+    assert f"Wi-Fi pairing: {record}" in out
+    assert "On the network: answering at 192.0.2.7" in out
     assert device.closed
 
 
-@pytest.mark.parametrize(("action", "expected"), [("enable", True), ("disable", False)])
-def test_wifi_enable_and_disable_change_the_setting(home, tmp_path, capsys, action, expected):
-    device = phone(wifi_enabled=not expected)
+def test_wifi_status_explains_a_missing_pairing_and_a_silent_phone(home, capsys):
+    backend = FakeWifiBackend(answering=False)
 
-    code = main(
-        ["wifi", action, "--pair-records", str(tmp_path / "none")], open_device=opener_for(device)
-    )
+    main(["wifi", "status"], open_device=opener_for(phone()), wifi_backend=backend)
 
-    assert code == 0
-    assert device.wifi_enabled is expected
     out = capsys.readouterr().out
-    assert f"Wi-Fi connections: {'enabled' if expected else 'disabled'}" in out
-    assert "Pair record for network use: pair record directory" in out
+    assert "Wi-Fi connections setting: off" in out
+    assert "Wi-Fi pairing: this computer has no Wi-Fi pairing" in out
 
 
-def test_wifi_enable_fails_when_the_phone_does_not_keep_it(home, capsys):
+def test_wifi_enable_turns_the_setting_on_and_pairs_once(home, tmp_path, capsys):
+    backend = FakeWifiBackend(home=tmp_path)
+    device = phone(wifi_enabled=False)
+
+    assert main(["wifi", "enable"], open_device=opener_for(device), wifi_backend=backend) == 0
+
+    out = capsys.readouterr().out
+    assert device.wifi_enabled is True
+    assert backend.paired == [device]
+    assert f"Wi-Fi pairing: {tmp_path / f'remote_{UDID}.plist'}" in out
+    assert "Use --wifi from now on" in out
+
+
+def test_wifi_disable_keeps_the_pairing_unless_asked_to_forget(home, tmp_path, capsys):
+    record = tmp_path / f"remote_{UDID}.plist"
+    record.write_bytes(b"record")
+    backend = FakeWifiBackend([RemoteRecord(UDID, record, True)])
+    device = phone(wifi_enabled=True)
+
+    assert main(["wifi", "disable"], open_device=opener_for(device), wifi_backend=backend) == 0
+    assert record.exists()
+    assert device.wifi_enabled is False
+    main(["wifi", "disable", "--forget"], open_device=opener_for(device), wifi_backend=backend)
+    assert not record.exists()
+
+
+def test_forget_only_goes_with_disable(home, capsys):
+    assert main(["wifi", "enable", "--forget"], open_device=must_not_connect) == 2
+    assert "--forget only goes with disable" in capsys.readouterr().err
+
+
+def test_wifi_enable_fails_when_the_phone_does_not_keep_it(home, tmp_path, capsys):
     class Stubborn(FakeSpringBoard):
         async def set_wifi_connections(self, enabled):
             return None
 
     device = Stubborn(samples.home_screen(), samples.installed_apps())
+    backend = FakeWifiBackend(home=tmp_path)
 
-    assert main(["wifi", "enable"], open_device=opener_for(device)) == 1
+    assert main(["wifi", "enable"], open_device=opener_for(device), wifi_backend=backend) == 1
     assert "did not keep" in capsys.readouterr().err
 
 

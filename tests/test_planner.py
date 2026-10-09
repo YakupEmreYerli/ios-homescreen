@@ -46,6 +46,13 @@ KEEP_SPECIALS = """
 items = [{ type = "widget", id = "widget-1" }, { type = "webclip", id = "web-1" }]
 """
 
+# The sample's other web clips and web app: a layout cannot leave them out.
+SAMPLE_WEB = (
+    f'{{ type = "webclip", id = "{samples.STATUS_CLIP}" }}, '
+    f'{{ type = "webclip", id = "{samples.DOCS_CLIP}" }}, '
+    f'{{ type = "webapp", id = "{samples.WEBAPP_FOLDER}" }}'
+)
+
 
 def test_export_plans_back_to_the_same_layout():
     read = _read()
@@ -106,7 +113,7 @@ def test_safari_web_app_and_safari_are_separate_items_in_a_plan():
 items = ["Safari"]
 
 [[pages]]
-items = [{{ type = "webapp", id = "{samples.WEBAPP_PAGE}" }}]
+items = [{{ type = "webapp", id = "{samples.WEBAPP_PAGE}" }}, {SAMPLE_WEB}]
 """
 
     plan = plan_layout(layout, read, allow_removal=True)
@@ -116,11 +123,11 @@ items = [{{ type = "webapp", id = "{samples.WEBAPP_PAGE}" }}]
     assert "com.apple.mobilesafari" not in plan.payload["ignored"]
 
 
-def test_web_app_alone_leaves_safari_in_the_app_library():
+def test_web_apps_without_safari_leave_safari_in_the_app_library():
     read = samples.read_snapshot()
     layout = f"""
 [[pages]]
-items = [{{ type = "webapp", id = "{samples.WEBAPP_PAGE}" }}]
+items = [{{ type = "webapp", id = "{samples.WEBAPP_PAGE}" }}, {SAMPLE_WEB}]
 """
 
     plan = plan_layout(layout, read, allow_removal=True)
@@ -136,13 +143,14 @@ def test_two_widgets_from_one_extension_can_swap_places():
 items = [
   {{ type = "widget", id = "{samples.LIGHTS_B}" }},
   {{ type = "widget", id = "{samples.LIGHTS_A}" }},
+  {{ type = "webapp", id = "{samples.WEBAPP_PAGE}" }}, {SAMPLE_WEB},
 ]
 """
 
     plan = plan_layout(layout, read, allow_removal=True)
 
     page = plan.payload["iconLists"][0]
-    assert [item_id(w) for w in page] == [samples.LIGHTS_B, samples.LIGHTS_A]
+    assert [item_id(w) for w in page[:2]] == [samples.LIGHTS_B, samples.LIGHTS_A]
     assert page[0]["userSelectedElementIdentifier"] == "scene-2"
 
 
@@ -159,7 +167,7 @@ def test_left_out_apps_go_to_the_library_and_new_apps_get_the_minimal_form():
 items = ["C"]
 
 [[pages]]
-items = []
+items = [{ type = "webclip", id = "web-1" }]
 """
 
     plan = plan_layout(layout, _read(), allow_removal=True)
@@ -174,7 +182,10 @@ items = []
 
 def test_explicit_app_table_takes_ids_only():
     plan = plan_layout(
-        '[dock]\nitems = [{ type = "app", id = "com.a" }]\n', _read(), allow_removal=True
+        '[dock]\nitems = [{ type = "app", id = "com.a" }]\n'
+        '[[pages]]\nitems = [{ type = "webclip", id = "web-1" }]\n',
+        _read(),
+        allow_removal=True,
     )
     assert plan.payload["buttonBar"] == [{"bundleIdentifier": "com.a", "displayName": "A"}]
 
@@ -252,26 +263,52 @@ def test_widget_cells_count_toward_page_capacity():
         plan_layout(layout, read, allow_removal=True)
 
 
-def test_leaving_out_widgets_and_web_clips_needs_allow_removal():
-    layout = '[[pages]]\nitems = ["com.a"]'
+def test_leaving_out_a_widget_needs_allow_removal():
+    layout = '[[pages]]\nitems = ["com.a", { type = "webclip", id = "web-1" }]'
 
     with pytest.raises(LayoutError, match="--allow-removal") as error:
         plan_layout(layout, _read())
 
-    assert "widget-1" in str(error.value)
-    assert "web-1" in str(error.value)
+    assert error.value.code == "removal_not_allowed"
+    assert error.value.issues[0].details == {"ids": ["widget-1"]}
     plan = plan_layout(layout, _read(), allow_removal=True)
-    assert plan.removed == ("web-1", "widget-1")
+    assert plan.removed == ("widget-1",)
 
 
-def test_leaving_out_a_web_app_needs_allow_removal():
+@pytest.mark.parametrize("allow_removal", [False, True])
+def test_web_clips_cannot_be_removed_even_with_allow_removal(allow_removal):
+    # SpringBoard puts a left-out web clip back on a new last page.
+    layout = '[[pages]]\nitems = ["com.a", { type = "widget", id = "widget-1" }]'
+
+    with pytest.raises(LayoutError, match="Delete Bookmark") as error:
+        plan_layout(layout, _read(), allow_removal=allow_removal)
+
+    (issue,) = error.value.issues
+    assert issue.code == "not_removable"
+    assert issue.details == {"id": "web-1", "kind": "webclip", "name": "Panel"}
+    assert "'Panel' (web-1)" in str(issue)
+
+
+def test_web_apps_cannot_be_removed_either():
     read = samples.read_snapshot()
     layout = export_layout(read).replace(
         f'  {{ type = "webapp", id = "{samples.WEBAPP_PAGE}" }},', ""
     )
 
-    with pytest.raises(LayoutError, match=samples.WEBAPP_PAGE):
-        plan_layout(layout, read)
+    with pytest.raises(LayoutError, match=samples.WEBAPP_PAGE) as error:
+        plan_layout(layout, read, allow_removal=True)
+
+    assert [i.code for i in error.value.issues] == ["not_removable"]
+    assert error.value.issues[0].details["kind"] == "webapp"
+
+
+def test_unresolved_items_do_not_also_count_as_left_out():
+    layout = '[[pages]]\nitems = ["com.a", { type = "webclip", id = "web-x" }]'
+
+    with pytest.raises(LayoutError) as error:
+        plan_layout(layout, _read(), allow_removal=True)
+
+    assert [i.code for i in error.value.issues] == ["unknown_item"]
 
 
 def test_folders_use_list_type_and_reuse_the_read_dictionaries():
@@ -340,8 +377,8 @@ def test_web_clip_inside_a_folder_round_trips_and_cannot_be_dropped_silently():
 
     assert 'type = "webclip"' in text
     assert same_layout(plan.payload, read["state"])
-    with pytest.raises(LayoutError, match=r"folder-web.*--allow-removal"):
-        plan_layout('[[pages]]\nitems = ["com.a"]', read)
+    with pytest.raises(LayoutError, match=r"folder-web.*Delete Bookmark"):
+        plan_layout('[[pages]]\nitems = ["com.a"]', read, allow_removal=True)
 
 
 def test_errors_say_where_the_problem_is():

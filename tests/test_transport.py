@@ -1,314 +1,300 @@
+"""USB and Wi-Fi connection logic, with fakes. Nothing here touches a network or usbmuxd."""
+
 from __future__ import annotations
 
 import asyncio
-import os
-import plistlib
-from dataclasses import dataclass, field
+import sys
+import types
 from pathlib import Path
 
 import pytest
 
+from fakes import FakeWifiBackend
 from ios_homescreen.transport import (
-    Candidate,
+    PymobiledeviceBackend,
+    RemoteRecord,
     Transport,
     TransportError,
     connect,
-    load_pair_records,
-    mac_from_instance,
-    match_discovered,
-    normalize_mac,
-    pick_candidate,
-    record_for_host,
+    pick_record,
 )
 
 UDID_A = "00008120-000A1B2C3D4E5F60"
 UDID_B = "00008030-0011223344556677"
-MAC_A = "a0:b1:c2:d3:e4:f5"
-MAC_B = "10:20:30:40:50:60"
-
-
-def write_record(directory: Path, udid: str, mac: str | None) -> Path:
-    record = {
-        "HostID": "HOST-ID",
-        "SystemBUID": "BUID",
-        "HostCertificate": b"cert",
-        "HostPrivateKey": b"key",
-        "DeviceCertificate": b"device",
-    }
-    if mac:
-        record["WiFiMACAddress"] = mac
-    path = directory / f"{udid}.plist"
-    path.write_bytes(plistlib.dumps(record))
-    return path
-
-
-@pytest.fixture
-def records(tmp_path) -> Path:
-    write_record(tmp_path, UDID_A, MAC_A)
-    write_record(tmp_path, UDID_B, MAC_B)
-    (tmp_path / "SystemConfiguration.plist").write_bytes(plistlib.dumps({"SystemBUID": "BUID"}))
-    (tmp_path / "remote_ABC.plist").write_bytes(plistlib.dumps({"HostID": "x"}))
-    (tmp_path / "broken.plist").write_text("not a plist")
-    (tmp_path / "notes.txt").write_text("ignore me")
-    return tmp_path
-
-
-@dataclass
-class Address:
-    full_ip: str
-
-
-@dataclass
-class Answer:
-    instance: str
-    addresses: list = field(default_factory=list)
-
-
-def answer(mac: str, *ips: str) -> Answer:
-    return Answer(f"{mac}@fe80::1._apple-mobdev2._tcp.local.", [Address(ip) for ip in ips])
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        ("A0:B1:C2:D3:E4:F5", "a0:b1:c2:d3:e4:f5"),
-        ("a0:b:c2:d3:e4:5", "a0:0b:c2:d3:e4:05"),
-        ("a0-b1-c2-d3-e4-f5", "a0:b1:c2:d3:e4:f5"),
-        ("a0:b1:c2", None),
-        ("zz:b1:c2:d3:e4:f5", None),
-        ("100:b1:c2:d3:e4:f5", None),
-        (None, None),
-    ],
-)
-def test_normalize_mac(value, expected):
-    assert normalize_mac(value) == expected
-
-
-def test_mac_from_instance_reads_the_part_before_the_at_sign():
-    assert mac_from_instance("A0:B1:C2:D3:E4:F5@fe80::1._apple-mobdev2._tcp.local.") == MAC_A
-    assert mac_from_instance("no-at-sign._apple-mobdev2._tcp.local.") is None
-
-
-def test_load_pair_records_keeps_device_records_only(records):
-    found = load_pair_records(records)
-
-    assert [(r.udid, r.wifi_mac) for r in found] == [(UDID_B, MAC_B), (UDID_A, MAC_A)]
-    assert found[0].data["HostID"] == "HOST-ID"
-
-
-def test_load_pair_records_filters_by_udid_ignoring_case(records):
-    found = load_pair_records(records, UDID_A.lower())
-
-    assert [r.udid for r in found] == [UDID_A]
-
-
-def test_missing_pair_record_directory_is_a_clear_error(tmp_path):
-    with pytest.raises(TransportError, match="does not exist") as error:
-        load_pair_records(tmp_path / "nope")
-
-    assert error.value.code == "pair_records_missing"
-
-
-@pytest.mark.skipif(os.geteuid() == 0, reason="root can read anything")
-def test_unreadable_pair_record_directory_is_a_clear_error(tmp_path):
-    locked = tmp_path / "locked"
-    locked.mkdir()
-    locked.chmod(0)
-    try:
-        with pytest.raises(TransportError, match="permission denied") as error:
-            load_pair_records(locked)
-    finally:
-        locked.chmod(0o700)
-
-    assert error.value.code == "pair_records_unreadable"
-
-
-def test_discovery_matches_answers_to_records_by_wifi_mac(records):
-    answers = [
-        answer("ff:ff:ff:ff:ff:ff", "192.168.1.99"),  # someone else's phone
-        answer("A0:B1:C2:D3:E4:F5", "fe80::1%wlan0", "2001:db8::5"),
-        answer(MAC_A, "192.168.1.20", "fe80::1%wlan0"),
-    ]
-
-    found = match_discovered(answers, load_pair_records(records))
-
-    assert len(found) == 1
-    assert found[0].record.udid == UDID_A
-    assert found[0].addresses == ("192.168.1.20", "2001:db8::5", "fe80::1%wlan0")
-
-
-def test_pick_candidate_explains_every_failure(records):
-    transport = Transport(wifi=True, pair_records=records)
-    a, b = load_pair_records(records)[1], load_pair_records(records)[0]
-
-    with pytest.raises(TransportError, match="no paired device answered") as error:
-        pick_candidate([], 0, transport)
-    assert error.value.code == "no_device_found"
-    with pytest.raises(TransportError, match="none matches") as error:
-        pick_candidate([], 2, transport)
-    assert error.value.code == "no_matching_device"
-    with pytest.raises(TransportError, match="--udid") as error:
-        pick_candidate([Candidate(a, ("1.1.1.1",)), Candidate(b, ("1.1.1.2",))], 2, transport)
-    assert error.value.code == "several_devices"
-    with pytest.raises(TransportError, match="usable address") as error:
-        pick_candidate([Candidate(a, ())], 1, transport)
-    assert error.value.code == "no_address"
-    assert pick_candidate([Candidate(a, ("1.1.1.1",))], 1, transport).record is a
-
-
-def test_host_needs_exactly_one_pair_record(records, tmp_path):
-    transport = Transport(host="192.168.1.20", pair_records=records)
-    all_records = load_pair_records(records)
-
-    with pytest.raises(TransportError, match="several pair records") as error:
-        record_for_host(all_records, transport)
-    assert error.value.code == "several_pair_records"
-    with pytest.raises(TransportError, match="no pair record") as error:
-        record_for_host([], transport)
-    assert error.value.code == "no_pair_record"
-    assert record_for_host(all_records[:1], transport) is all_records[0]
-
-
-class FakeLockdown:
-    def __init__(self, host: str, paired: bool = True):
-        self.host = host
-        self.paired = paired
-        self.closed = False
-
-    async def close(self):
-        self.closed = True
-
-
-class FakeBackend:
-    def __init__(self, answers=(), *, failing=(), unpaired=(), usb_hangs=False):
-        self.answers = list(answers)
-        self.failing = set(failing)
-        self.unpaired = set(unpaired)
-        self.usb_hangs = usb_hangs
-        self.calls: list[tuple] = []
-        self.lockdowns: list[FakeLockdown] = []
-
-    async def usb(self, udid, pair_timeout):
-        self.calls.append(("usb", udid, pair_timeout))
-        if self.usb_hangs:
-            await asyncio.Event().wait()
-        return FakeLockdown("usb")
-
-    async def tcp(self, host, pair_record):
-        self.calls.append(("tcp", host, pair_record["WiFiMACAddress"]))
-        if host in self.failing:
-            raise ConnectionRefusedError("refused")
-        lockdown = FakeLockdown(host, paired=host not in self.unpaired)
-        self.lockdowns.append(lockdown)
-        return lockdown
-
-    async def browse(self, timeout):
-        self.calls.append(("browse", timeout))
-        return self.answers
 
 
 def run(coro):
     return asyncio.run(coro)
 
 
-def test_usb_is_the_default_and_never_touches_the_network(records):
-    backend = FakeBackend()
+def record(udid: str = UDID_A, usable: bool = True) -> RemoteRecord:
+    return RemoteRecord(udid, Path(f"/records/remote_{udid}.plist"), usable)
+
+
+def test_usb_is_the_default_and_never_looks_at_the_network():
+    backend = FakeWifiBackend([record()])
     events = []
 
-    lockdown = run(
-        connect(
-            Transport(udid=UDID_A, pair_records=records, connect_timeout=7),
-            backend=backend,
-            on_event=events.append,
-        )
-    )
+    link = run(connect(Transport(), backend=backend, on_event=events.append))
 
-    assert lockdown.host == "usb"
-    assert backend.calls == [("usb", UDID_A, 7)]
-    assert events[0].code == "connecting"
-    assert events[0].data["transport"] == "usb"
+    assert link.kind == "usb"
+    assert backend.calls == [("usb", None)]
+    assert [e.code for e in events] == ["connecting"]
+    run(link.close())
+    assert link.provider.closed
 
 
 def test_usb_connection_has_a_time_limit():
-    with pytest.raises(TransportError, match="timed out") as error:
-        run(connect(Transport(connect_timeout=0.01), backend=FakeBackend(usb_hangs=True)))
+    class Slow(FakeWifiBackend):
+        async def usb(self, udid, pair_timeout):
+            await asyncio.sleep(1)
+
+    with pytest.raises(TransportError) as error:
+        run(connect(Transport(connect_timeout=0.01), backend=Slow()))
 
     assert error.value.code == "timeout"
 
 
-def test_host_connects_directly_with_the_pair_record(records):
-    backend = FakeBackend()
+def test_unexpected_usb_failures_become_connection_errors():
+    class Broken(FakeWifiBackend):
+        async def usb(self, udid, pair_timeout):
+            raise OSError("cable")
 
-    lockdown = run(
-        connect(Transport(host="192.168.1.20", udid=UDID_B, pair_records=records), backend=backend)
+    with pytest.raises(TransportError, match="cable") as error:
+        run(connect(Transport(), backend=Broken()))
+
+    assert error.value.code == "connection_failed"
+
+
+def test_wifi_opens_the_tunnel_for_the_paired_phone():
+    backend = FakeWifiBackend([record()])
+    events = []
+
+    link = run(
+        connect(Transport(wifi=True, discovery_timeout=2), backend=backend, on_event=events.append)
     )
 
-    assert lockdown.host == "192.168.1.20"
-    assert backend.calls == [("tcp", "192.168.1.20", MAC_B)]
+    assert (link.kind, link.address) == ("wifi", "192.0.2.7")
+    assert backend.calls == [("wifi", UDID_A, 2)]
+    assert [e.code for e in events] == ["discovering", "connected"]
+    run(link.close())
+    assert backend.closed == 1
 
 
-def test_wifi_discovers_the_paired_phone_and_tries_its_addresses_in_order(records):
-    backend = FakeBackend(
-        [answer(MAC_A, "fe80::1%wlan0", "192.168.1.20")], failing={"192.168.1.20"}
-    )
-    transport = Transport(wifi=True, pair_records=records, discovery_timeout=2)
+def test_wifi_without_a_pairing_explains_the_one_time_setup():
+    backend = FakeWifiBackend([])
 
-    lockdown = run(connect(transport, backend=backend))
-
-    assert lockdown.host == "fe80::1%wlan0"
-    assert backend.calls == [
-        ("browse", 2),
-        ("tcp", "192.168.1.20", MAC_A),
-        ("tcp", "fe80::1%wlan0", MAC_A),
-    ]
-
-
-def test_wifi_with_udid_ignores_other_paired_phones(records):
-    backend = FakeBackend([answer(MAC_A, "192.168.1.20"), answer(MAC_B, "192.168.1.30")])
-
-    lockdown = run(
-        connect(Transport(wifi=True, udid=UDID_B, pair_records=records), backend=backend)
-    )
-
-    assert lockdown.host == "192.168.1.30"
-
-
-def test_rejected_pair_record_is_reported_and_the_connection_closed(records):
-    backend = FakeBackend(unpaired={"192.168.1.20"})
-
-    with pytest.raises(TransportError, match="did not accept the pair record") as error:
-        run(
-            connect(
-                Transport(host="192.168.1.20", udid=UDID_A, pair_records=records),
-                backend=backend,
-            )
-        )
-
-    assert error.value.code == "not_paired"
-    assert backend.lockdowns[0].closed
-
-
-def test_wifi_without_a_usable_pair_record_fails_before_browsing(tmp_path):
-    write_record(tmp_path, UDID_A, None)
-    backend = FakeBackend()
-
-    with pytest.raises(TransportError, match="Wi-Fi MAC") as error:
-        run(connect(Transport(wifi=True, pair_records=tmp_path), backend=backend))
+    with pytest.raises(TransportError, match="wifi enable") as error:
+        run(connect(Transport(wifi=True), backend=backend))
 
     assert error.value.code == "no_pair_record"
     assert backend.calls == []
 
 
-def test_wifi_with_nobody_answering_explains_what_to_check(records):
-    with pytest.raises(TransportError, match="same network") as error:
-        run(connect(Transport(wifi=True, pair_records=records), backend=FakeBackend([])))
+def test_wifi_with_several_pairings_needs_a_udid():
+    backend = FakeWifiBackend([record(UDID_A), record(UDID_B)])
 
-    assert error.value.code == "no_device_found"
+    with pytest.raises(TransportError, match="--udid") as error:
+        run(connect(Transport(wifi=True), backend=backend))
+    assert error.value.code == "several_pair_records"
+
+    run(connect(Transport(wifi=True, udid=UDID_B.lower()), backend=backend))
+    assert backend.calls == [("wifi", UDID_B, 5.0)]
+
+
+def test_old_pairings_without_the_alternate_irk_must_be_made_again():
+    with pytest.raises(TransportError, match="wifi enable") as error:
+        pick_record([record(usable=False)], None)
+
+    assert error.value.code == "stale_pair_record"
+
+
+def test_a_silent_phone_is_reported_as_not_answering():
+    backend = FakeWifiBackend([record()], answering=False)
+
+    with pytest.raises(TransportError) as error:
+        run(connect(Transport(wifi=True), backend=backend))
+
+    assert error.value.code == "not_advertising"
+
+
+def test_wifi_connection_has_a_time_limit():
+    class Slow(FakeWifiBackend):
+        async def wifi(self, udid, discovery_timeout):
+            await asyncio.sleep(1)
+
+    with pytest.raises(TransportError) as error:
+        run(
+            connect(
+                Transport(wifi=True, discovery_timeout=0.01, connect_timeout=0.01),
+                backend=Slow([record()]),
+            )
+        )
+
+    assert error.value.code == "timeout"
 
 
 def test_transport_description():
     assert Transport().describe() == "USB"
+    assert Transport(wifi=True).describe() == "Wi-Fi"
     assert not Transport().network
     assert Transport(wifi=True).network
-    assert Transport(host="10.0.0.2").network
-    assert Transport(host="10.0.0.2").describe() == "network (10.0.0.2)"
+
+
+# ------------------------------------------------- the pymobiledevice3 backend, faked
+
+
+@pytest.fixture
+def fake_pmd3(monkeypatch):
+    """Replace the pymobiledevice3 modules the Wi-Fi backend imports."""
+    state = types.SimpleNamespace(services=[], opened=[], provider_seen=None, fail=False)
+
+    class Service:
+        def __init__(self, host):
+            self.hostname = host
+            self.closed = False
+
+        async def close(self):
+            self.closed = True
+
+    async def get_remote_pairing_tunnel_services(bonjour_timeout, udid):
+        state.lookup = (bonjour_timeout, udid)
+        return state.services
+
+    async def original_provider(serial, autopair, remotepairing_fallback=True):
+        raise AssertionError("the stock provider must not be used")
+
+    userspace = types.ModuleType("pymobiledevice3.remote.userspace_tunnel")
+    userspace._create_no_root_tunnel_provider = original_provider
+
+    class Tunnel:
+        def __init__(self, serial=None, autopair=True):
+            self.serial = serial
+            self.closed = False
+
+        async def aopen(self):
+            # What UserspaceRsdTunnel._aopen_locked does: ask the module for a provider.
+            provider, _lockdown = await userspace._create_no_root_tunnel_provider(
+                self.serial, False, True
+            )
+            state.provider_seen = provider
+            if state.fail:
+                raise RuntimeError("tunnel failed")
+            state.opened.append(self)
+            return "rsd"
+
+        async def aclose(self):
+            self.closed = True
+
+    userspace.UserspaceRsdTunnel = Tunnel
+
+    class RemotePairingCompletedError(Exception):
+        pass
+
+    class LockdownPairing:
+        @classmethod
+        async def create(cls, lockdown):
+            state.pairing = cls()
+            state.pairing.lockdown = lockdown
+            return state.pairing
+
+        async def connect(self, autopair):
+            self.autopair = autopair
+            raise RemotePairingCompletedError()
+
+        async def close(self):
+            self.closed = True
+
+    tunnel_service = types.ModuleType("pymobiledevice3.remote.tunnel_service")
+    tunnel_service.get_remote_pairing_tunnel_services = get_remote_pairing_tunnel_services
+    tunnel_service.RemotePairingLockdownService = LockdownPairing
+    exceptions = types.ModuleType("pymobiledevice3.exceptions")
+    exceptions.RemotePairingCompletedError = RemotePairingCompletedError
+    pair_records = types.ModuleType("pymobiledevice3.pair_records")
+    pair_records.iter_remote_pair_records_by_identifier = lambda: iter(state.records)
+    state.records = []
+    remote = types.ModuleType("pymobiledevice3.remote")
+    remote.userspace_tunnel = userspace
+    remote.tunnel_service = tunnel_service
+    package = types.ModuleType("pymobiledevice3")
+    package.remote = remote
+    for name, module in {
+        "pymobiledevice3": package,
+        "pymobiledevice3.remote": remote,
+        "pymobiledevice3.remote.userspace_tunnel": userspace,
+        "pymobiledevice3.remote.tunnel_service": tunnel_service,
+        "pymobiledevice3.exceptions": exceptions,
+        "pymobiledevice3.pair_records": pair_records,
+    }.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    state.Service = Service
+    state.userspace = userspace
+    state.original_provider = original_provider
+    return state
+
+
+def test_backend_tunnels_through_the_service_found_on_the_network(fake_pmd3):
+    found, other = fake_pmd3.Service("192.0.2.7"), fake_pmd3.Service("fe80::1")
+    fake_pmd3.services = [found, other]
+
+    link = run(PymobiledeviceBackend().wifi(UDID_A, 3))
+
+    assert fake_pmd3.lookup == (3, UDID_A)
+    assert fake_pmd3.provider_seen is found
+    assert other.closed
+    assert not found.closed
+    assert (link.provider, link.kind, link.address) == ("rsd", "wifi", "192.0.2.7")
+    # The provider hook is only swapped for the length of the call.
+    assert fake_pmd3.userspace._create_no_root_tunnel_provider is fake_pmd3.original_provider
+    run(link.close())
+    assert fake_pmd3.opened[0].closed
+
+
+def test_backend_restores_the_hook_and_closes_the_service_when_the_tunnel_fails(fake_pmd3):
+    found = fake_pmd3.Service("192.0.2.7")
+    fake_pmd3.services = [found]
+    fake_pmd3.fail = True
+
+    with pytest.raises(RuntimeError, match="tunnel failed"):
+        run(PymobiledeviceBackend().wifi(UDID_A, 3))
+
+    assert found.closed
+    assert fake_pmd3.userspace._create_no_root_tunnel_provider is fake_pmd3.original_provider
+
+
+def test_backend_reports_a_phone_that_does_not_advertise(fake_pmd3):
+    with pytest.raises(TransportError) as error:
+        run(PymobiledeviceBackend().wifi(UDID_A, 3))
+
+    assert error.value.code == "not_advertising"
+    assert run(PymobiledeviceBackend().reachable(UDID_A, 3)) is None
+
+
+def test_backend_reachable_closes_what_it_opened(fake_pmd3):
+    found = fake_pmd3.Service("192.0.2.7")
+    fake_pmd3.services = [found]
+
+    assert run(PymobiledeviceBackend().reachable(UDID_A, 3)) == "192.0.2.7"
+    assert found.closed
+
+
+def test_backend_pairs_over_usb_and_takes_the_completed_signal_as_success(fake_pmd3):
+    lockdown = object()
+
+    run(PymobiledeviceBackend().pair_remote(lockdown))
+
+    assert fake_pmd3.pairing.lockdown is lockdown
+    assert fake_pmd3.pairing.autopair is True
+    assert fake_pmd3.pairing.closed
+
+
+def test_backend_lists_remote_pairings_and_flags_old_ones(fake_pmd3):
+    fake_pmd3.records = [
+        (UDID_A, Path("/r/remote_a.plist"), {"peer_alt_irk": b"irk", "private_key": b"k"}),
+        (UDID_B, Path("/r/remote_b.plist"), {"private_key": b"k"}),
+    ]
+
+    assert PymobiledeviceBackend().remote_records() == [
+        RemoteRecord(UDID_A, Path("/r/remote_a.plist"), True),
+        RemoteRecord(UDID_B, Path("/r/remote_b.plist"), False),
+    ]

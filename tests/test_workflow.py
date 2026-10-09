@@ -290,3 +290,31 @@ def test_progress_events_have_stable_codes_and_serialize_to_json(tmp_path):
     assert events == list(result.events)
     payload = json.dumps(result.to_dict())
     assert '"status": "applied"' in payload
+
+
+def test_a_write_that_leaves_out_a_web_clip_is_rolled_back(tmp_path):
+    # The planner refuses such a layout; this is the phone's side of the story. The fake,
+    # like SpringBoard, puts the web clip back on a new last page, so verification fails.
+    start = samples.home_screen()
+    device = FakeSpringBoard(start, samples.installed_apps())
+    pages = [
+        [
+            x
+            for x in page
+            if not (isinstance(x, dict) and x.get("displayIdentifier") == samples.STATUS_CLIP)
+        ]
+        for page in start[1:]
+    ]
+    plan = {
+        "buttonBar": start[0],
+        "iconLists": pages,
+        "ignored": [],
+        "_ios_homescreen": {"version": 1, "source_fingerprint": fingerprint(start)},
+    }
+
+    result = run(apply_state(device, plan, backup_dir=tmp_path, timing=FAST))
+
+    assert result.status == ROLLED_BACK
+    after_first_write = device.writes[0]
+    assert samples.STATUS_CLIP not in json.dumps(after_first_write, default=str)
+    assert same_layout(run(device.read_state()), start)

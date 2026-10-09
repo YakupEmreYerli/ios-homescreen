@@ -1,10 +1,23 @@
-"""Pick and open the lockdown connection: USB through usbmuxd, or the network.
+"""Open the connection to the phone: USB through usbmuxd, or Wi-Fi through RemotePairing.
 
-Over the network the phone is reached on its lockdown port (62078). Its address comes
-from ``--host`` or from Bonjour: paired iPhones with Wi-Fi connections enabled answer
-``_apple-mobdev2._tcp`` with an instance name that starts with their Wi-Fi MAC address,
-and usbmuxd's pair records carry the same address as ``WiFiMACAddress``. The pair
-record is what lets us start a session without the USB cable.
+USB is a lockdown session through usbmuxd.
+
+Wi-Fi needs iOS 17 or later and works like Xcode's wireless connection. The classic
+network lockdown (port 62078, found through ``_apple-mobdev2._tcp``) still answers on
+current iOS versions, but the phone closes every service on the first request, so it
+is not used. Instead:
+
+1. ``ios-homescreen wifi enable``, over USB once, creates a RemotePairing record on
+   this computer. The computer is already trusted over USB, so the phone shows no prompt.
+2. The phone then advertises ``_remotepairing._tcp`` on the local network. Its
+   advertisement is matched to the record by an authentication tag (not by MAC
+   address, which iOS randomises), and the record proves who we are.
+3. pymobiledevice3's userspace tunnel carries the session: a TCP/IP stack in this
+   process, so no root, no ``utun`` device and no Developer Mode. The springboard and
+   installation proxy services are reached through it as ``*.shim.remote``.
+
+Only one userspace tunnel can exist per process (pymobiledevice3's stack is global);
+callers close the connection before opening the next one.
 
 pymobiledevice3 is imported lazily so that ``--help`` and the tests never load it.
 """
@@ -13,19 +26,20 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import ipaddress
-import os
-import plistlib
-from collections.abc import Iterable
-from dataclasses import dataclass, field
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
 from .events import Event, EventSink, ignore
-from .paths import default_pair_records_dir
 
 DEFAULT_DISCOVERY_TIMEOUT = 5.0
 DEFAULT_CONNECT_TIMEOUT = 30.0
+CLOSE_TIMEOUT = 10.0
+
+# The key pymobiledevice3 stores the phone's alternate IRK under; without it the
+# phone's advertisement cannot be recognised (records made by old versions lack it).
+ALT_IRK_KEY = "peer_alt_irk"
 
 
 class TransportError(RuntimeError):
@@ -41,203 +55,59 @@ class Transport:
     """How to reach the device. The default is USB."""
 
     wifi: bool = False
-    host: str | None = None
     udid: str | None = None
-    pair_records: Path = field(default_factory=default_pair_records_dir)
     discovery_timeout: float = DEFAULT_DISCOVERY_TIMEOUT
     connect_timeout: float = DEFAULT_CONNECT_TIMEOUT
 
     @property
     def network(self) -> bool:
-        return self.wifi or bool(self.host)
+        return self.wifi
 
     def describe(self) -> str:
-        if self.host:
-            return f"network ({self.host})"
-        if self.wifi:
-            return "network (Bonjour discovery)"
-        return "USB"
+        return "Wi-Fi" if self.wifi else "USB"
 
 
 @dataclass(frozen=True)
-class PairRecord:
+class Link:
+    """An open connection. Services start on ``provider``; ``close`` ends the session."""
+
+    provider: Any
+    close: Callable[[], Awaitable[Any]]
+    kind: str = "usb"
+    """``usb`` or ``wifi``."""
+    address: str | None = None
+
+
+@dataclass(frozen=True)
+class RemoteRecord:
+    """A RemotePairing record on this computer (the Wi-Fi pairing with one phone)."""
+
     udid: str
     path: Path
-    wifi_mac: str | None
-    data: dict[str, Any] = field(repr=False)
-
-
-@dataclass(frozen=True)
-class Candidate:
-    record: PairRecord
-    addresses: tuple[str, ...]
-
-
-def normalize_mac(value: Any) -> str | None:
-    """``"A0:B:0C:..."`` -> ``"a0:0b:0c:..."``; ``None`` if it is not a MAC address."""
-    if not isinstance(value, str):
-        return None
-    parts = value.strip().lower().replace("-", ":").split(":")
-    if len(parts) != 6:
-        return None
-    try:
-        octets = [int(part, 16) for part in parts]
-    except ValueError:
-        return None
-    if any(not 0 <= octet <= 255 for octet in octets):
-        return None
-    return ":".join(f"{octet:02x}" for octet in octets)
-
-
-def mac_from_instance(instance: str) -> str | None:
-    """Wi-Fi MAC from a mobdev2 instance name such as ``aa:bb:...@fe80::1._apple-mobdev2...``."""
-    if "@" not in instance:
-        return None
-    return normalize_mac(instance.split("@", 1)[0])
-
-
-def _same_udid(a: str, b: str) -> bool:
-    return a.strip().lower() == b.strip().lower()
-
-
-def load_pair_records(directory: Path, udid: str | None = None) -> list[PairRecord]:
-    """Device pair records in usbmuxd's store, optionally only the one for ``udid``.
-
-    Files that are not device pair records (``SystemConfiguration.plist``, for one)
-    are skipped.
-    """
-    directory = Path(directory)
-    try:
-        names = sorted(os.listdir(directory))
-    except FileNotFoundError as exc:
-        raise TransportError(
-            f"pair record directory {directory} does not exist; pair the phone over USB "
-            "first, or point --pair-records at the right directory",
-            code="pair_records_missing",
-        ) from exc
-    except PermissionError as exc:
-        raise TransportError(
-            f"cannot list {directory} (permission denied); give your user read access "
-            "or pass --pair-records with a readable copy",
-            code="pair_records_unreadable",
-        ) from exc
-    records = []
-    for name in names:
-        path = directory / name
-        if not name.endswith(".plist") or name.startswith("remote_"):
-            continue
-        stem = name.removesuffix(".plist")
-        if udid is not None and not _same_udid(stem, udid):
-            continue
-        try:
-            data = plistlib.loads(path.read_bytes())
-        except PermissionError as exc:
-            raise TransportError(
-                f"cannot read {path} (permission denied); give your user read access "
-                "or pass --pair-records with a readable copy",
-                code="pair_records_unreadable",
-            ) from exc
-        except (OSError, plistlib.InvalidFileException, ValueError):
-            continue
-        if not isinstance(data, dict) or not {"HostID", "HostCertificate"} <= data.keys():
-            continue
-        records.append(PairRecord(stem, path, normalize_mac(data.get("WiFiMACAddress")), data))
-    return records
-
-
-def _address_order(address: str) -> tuple[int, str]:
-    try:
-        ip = ipaddress.ip_address(address.split("%", 1)[0])
-    except ValueError:
-        return (3, address)
-    if ip.version == 4:
-        return (0, address)
-    return (2 if ip.is_link_local else 1, address)
-
-
-def _full_ip(address: Any) -> str | None:
-    value = getattr(address, "full_ip", address)
-    return value if isinstance(value, str) and value else None
-
-
-def match_discovered(answers: Iterable[Any], records: Iterable[PairRecord]) -> list[Candidate]:
-    """Pair Bonjour answers with pair records through the Wi-Fi MAC address.
-
-    ``answers`` are pymobiledevice3 ``ServiceInstance`` objects (``instance`` and
-    ``addresses``). Several answers for one phone (one per interface) are merged.
-    IPv4 addresses come first, link-local IPv6 last.
-    """
-    by_mac = {record.wifi_mac: record for record in records if record.wifi_mac}
-    found: dict[str, tuple[PairRecord, list[str]]] = {}
-    for answer in answers:
-        record = by_mac.get(mac_from_instance(str(getattr(answer, "instance", ""))))
-        if record is None:
-            continue
-        _, addresses = found.setdefault(record.udid, (record, []))
-        for address in getattr(answer, "addresses", []) or []:
-            ip = _full_ip(address)
-            if ip and ip not in addresses:
-                addresses.append(ip)
-    return [
-        Candidate(record, tuple(sorted(addresses, key=_address_order)))
-        for _, (record, addresses) in sorted(found.items())
-    ]
-
-
-def pick_candidate(candidates: list[Candidate], answered: int, transport: Transport) -> Candidate:
-    if not candidates:
-        if answered:
-            raise TransportError(
-                f"{answered} device(s) answered on the network, but none matches a pair "
-                f"record in {transport.pair_records}"
-                + (f" for UDID {transport.udid}" if transport.udid else "")
-                + ". Check --udid and --pair-records, or use --host.",
-                code="no_matching_device",
-            )
-        raise TransportError(
-            "no paired device answered on the network. The phone must be on the same "
-            "network, awake and unlocked, with Wi-Fi connections enabled "
-            "('ios-homescreen wifi enable' over USB once). Or pass --host.",
-            code="no_device_found",
-        )
-    if len(candidates) > 1:
-        udids = ", ".join(c.record.udid for c in candidates)
-        raise TransportError(
-            f"several paired devices answered ({udids}); pick one with --udid",
-            code="several_devices",
-        )
-    candidate = candidates[0]
-    if not candidate.addresses:
-        raise TransportError(
-            f"device {candidate.record.udid} answered without a usable address; try --host",
-            code="no_address",
-        )
-    return candidate
-
-
-def record_for_host(records: list[PairRecord], transport: Transport) -> PairRecord:
-    if not records:
-        which = f" for UDID {transport.udid}" if transport.udid else ""
-        raise TransportError(
-            f"no pair record{which} in {transport.pair_records}; pair over USB first "
-            "or point --pair-records at the right directory",
-            code="no_pair_record",
-        )
-    if len(records) > 1:
-        udids = ", ".join(record.udid for record in records)
-        raise TransportError(
-            f"several pair records in {transport.pair_records} ({udids}); pick one with --udid",
-            code="several_pair_records",
-        )
-    return records[0]
+    usable: bool
+    """False for records without the phone's alternate IRK (made by older versions)."""
 
 
 class Backend(Protocol):
     async def usb(self, udid: str | None, pair_timeout: float) -> Any: ...
 
-    async def tcp(self, host: str, pair_record: dict[str, Any]) -> Any: ...
+    async def wifi(self, udid: str, discovery_timeout: float) -> Link: ...
 
-    async def browse(self, timeout: float) -> list[Any]: ...
+    def remote_records(self) -> list[RemoteRecord]: ...
+
+    async def pair_remote(self, lockdown: Any) -> None: ...
+
+    async def reachable(self, udid: str, discovery_timeout: float) -> str | None: ...
+
+
+_tunnel_lock: asyncio.Lock | None = None
+
+
+def _lock() -> asyncio.Lock:
+    global _tunnel_lock
+    if _tunnel_lock is None:
+        _tunnel_lock = asyncio.Lock()
+    return _tunnel_lock
 
 
 class PymobiledeviceBackend:
@@ -268,51 +138,112 @@ class PymobiledeviceBackend:
                 code="usbmuxd_unreachable",
             ) from exc
 
-    async def tcp(self, host: str, pair_record: dict[str, Any]) -> Any:
-        from pymobiledevice3.lockdown import create_using_tcp
+    def remote_records(self) -> list[RemoteRecord]:
+        from pymobiledevice3.pair_records import iter_remote_pair_records_by_identifier
 
-        # The pair record must be passed in: over TCP pymobiledevice3 would look it up
-        # by host name and find nothing. autopair=False: never start pairing over Wi-Fi.
-        return await create_using_tcp(
-            hostname=host, autopair=False, pair_record=pair_record, keep_alive=True
+        return [
+            RemoteRecord(identifier, path, bool(record.get(ALT_IRK_KEY)))
+            for identifier, path, record in iter_remote_pair_records_by_identifier()
+        ]
+
+    async def pair_remote(self, lockdown: Any) -> None:
+        """Create the RemotePairing record over an already trusted USB lockdown session."""
+        from pymobiledevice3.exceptions import RemotePairingCompletedError
+        from pymobiledevice3.remote.tunnel_service import RemotePairingLockdownService
+
+        service = await RemotePairingLockdownService.create(lockdown)
+        try:
+            await service.connect(autopair=True)
+        except RemotePairingCompletedError:
+            # The phone closes the channel once pairing is done; the record is saved.
+            pass
+        finally:
+            await service.close()
+
+    async def _find(self, udid: str, discovery_timeout: float) -> Any | None:
+        from pymobiledevice3.remote.tunnel_service import get_remote_pairing_tunnel_services
+
+        services = await get_remote_pairing_tunnel_services(
+            bonjour_timeout=discovery_timeout, udid=udid
         )
+        for extra in services[1:]:
+            await extra.close()
+        return services[0] if services else None
 
-    async def browse(self, timeout: float) -> list[Any]:
-        from pymobiledevice3.bonjour import browse_mobdev2
+    async def reachable(self, udid: str, discovery_timeout: float) -> str | None:
+        """The phone's address if it advertises RemotePairing and accepts our record."""
+        service = await self._find(udid, discovery_timeout)
+        if service is None:
+            return None
+        await service.close()
+        return str(getattr(service, "hostname", "") or "") or "?"
 
-        return await browse_mobdev2(timeout=timeout)
+    async def wifi(self, udid: str, discovery_timeout: float) -> Link:
+        from pymobiledevice3.remote import userspace_tunnel
+
+        # One userspace tunnel per process: open them one at a time.
+        async with _lock():
+            service = await self._find(udid, discovery_timeout)
+            if service is None:
+                raise TransportError(
+                    "the iPhone did not answer on the network. Keep it awake and unlocked "
+                    "on the same network as this computer.",
+                    code="not_advertising",
+                )
+            address = str(getattr(service, "hostname", "") or "")
+
+            async def provider(serial: Any, autopair: Any, remotepairing_fallback: Any = True):
+                return service, None
+
+            # UserspaceRsdTunnel asks this module function for its tunnel provider; hand it
+            # the service found above for the length of the call, then put it back.
+            tunnel = userspace_tunnel.UserspaceRsdTunnel(serial=udid, autopair=False)
+            original = userspace_tunnel._create_no_root_tunnel_provider
+            userspace_tunnel._create_no_root_tunnel_provider = provider
+            try:
+                rsd = await tunnel.aopen()
+            except BaseException:
+                await service.close()
+                raise
+            finally:
+                userspace_tunnel._create_no_root_tunnel_provider = original
+        return Link(rsd, tunnel.aclose, kind="wifi", address=address or None)
 
 
-async def close_quietly(lockdown: Any, timeout: float = 3.0) -> None:
-    close = getattr(lockdown, "close", None)
-    if close is None:
-        return
+async def close_quietly(close: Callable[[], Awaitable[Any]], timeout: float = 3.0) -> None:
+    """Run ``close()`` with a time limit; never raises."""
     # Nothing useful can be done about a failed close; the socket goes away anyway.
     with contextlib.suppress(Exception):
         await asyncio.wait_for(close(), timeout=timeout)
 
 
-async def _tcp(backend: Backend, host: str, record: PairRecord, timeout: float) -> Any:
-    try:
-        lockdown = await asyncio.wait_for(backend.tcp(host, record.data), timeout=timeout)
-    except TimeoutError as exc:
+def pick_record(records: list[RemoteRecord], udid: str | None) -> RemoteRecord:
+    """The Wi-Fi pairing to use: the one for ``udid``, or the only one there is."""
+    if udid is not None:
+        records = [r for r in records if r.udid.strip().lower() == udid.strip().lower()]
+    if not records:
+        which = f" with {udid}" if udid else ""
         raise TransportError(
-            f"connecting to {host} timed out after {timeout:g} s", code="timeout"
-        ) from exc
-    except TransportError:
-        raise
-    except Exception as exc:
-        raise TransportError(
-            f"could not connect to {host}: {exc}", code="connection_failed"
-        ) from exc
-    if not getattr(lockdown, "paired", False):
-        await close_quietly(lockdown)
-        raise TransportError(
-            f"{host} did not accept the pair record of {record.udid}. Connect over USB "
-            "and trust this computer again.",
-            code="not_paired",
+            f"this computer has no Wi-Fi pairing{which} yet. Connect the iPhone with a cable "
+            "once and run 'ios-homescreen wifi enable'.",
+            code="no_pair_record",
         )
-    return lockdown
+    if len(records) > 1:
+        udids = ", ".join(sorted(r.udid for r in records))
+        raise TransportError(
+            f"this computer has Wi-Fi pairings with several devices ({udids}); "
+            "pick one with --udid",
+            code="several_pair_records",
+        )
+    record = records[0]
+    if not record.usable:
+        raise TransportError(
+            f"the Wi-Fi pairing in {record.path} was made by an older pymobiledevice3 and "
+            "cannot be used. Connect the iPhone with a cable and run "
+            "'ios-homescreen wifi enable' again.",
+            code="stale_pair_record",
+        )
+    return record
 
 
 async def connect(
@@ -320,14 +251,14 @@ async def connect(
     *,
     backend: Backend | None = None,
     on_event: EventSink = ignore,
-) -> Any:
-    """Open a lockdown client over the transport ``transport`` describes."""
+) -> Link:
+    """Open the connection ``transport`` describes."""
     backend = backend or PymobiledeviceBackend()
     timeout = transport.connect_timeout
-    if not transport.network:
+    if not transport.wifi:
         on_event(Event("connecting", "Connecting over USB...", data={"transport": "usb"}))
         try:
-            return await asyncio.wait_for(backend.usb(transport.udid, timeout), timeout=timeout)
+            lockdown = await asyncio.wait_for(backend.usb(transport.udid, timeout), timeout=timeout)
         except TimeoutError as exc:
             raise TransportError(
                 f"USB connection timed out after {timeout:g} s. If the phone shows "
@@ -340,54 +271,37 @@ async def connect(
             raise TransportError(
                 f"could not connect over USB: {exc}", code="connection_failed"
             ) from exc
+        return Link(lockdown, lockdown.close, kind="usb")
 
-    records = load_pair_records(transport.pair_records, transport.udid)
-    if transport.host:
-        record = record_for_host(records, transport)
-        on_event(
-            Event(
-                "connecting",
-                f"Connecting to {transport.host} over the network...",
-                data={"transport": "network", "host": transport.host},
-            )
-        )
-        return await _tcp(backend, transport.host, record, timeout)
-
-    if not any(record.wifi_mac for record in records):
-        which = f" for UDID {transport.udid}" if transport.udid else ""
-        raise TransportError(
-            f"no pair record{which} with a Wi-Fi MAC address in {transport.pair_records}; "
-            "pair over USB first, or use --host",
-            code="no_pair_record",
-        )
+    record = pick_record(backend.remote_records(), transport.udid)
     on_event(
         Event(
             "discovering",
-            f"Looking for paired devices on the network ({transport.discovery_timeout:g} s)...",
-            data={"timeout": transport.discovery_timeout},
+            f"Looking for the iPhone on the network ({transport.discovery_timeout:g} s)...",
+            data={"transport": "wifi", "udid": record.udid},
         )
     )
     try:
-        answers = await asyncio.wait_for(
-            backend.browse(transport.discovery_timeout),
-            timeout=transport.discovery_timeout + 10,
+        link = await asyncio.wait_for(
+            backend.wifi(record.udid, transport.discovery_timeout),
+            timeout=transport.discovery_timeout + timeout,
         )
     except TimeoutError as exc:
-        raise TransportError("Bonjour discovery did not finish", code="discovery_failed") from exc
-    except OSError as exc:
-        raise TransportError(f"Bonjour discovery failed: {exc}", code="discovery_failed") from exc
-    candidate = pick_candidate(match_discovered(answers, records), len(answers), transport)
-    errors: list[TransportError] = []
-    for address in candidate.addresses:
-        on_event(
-            Event(
-                "connecting",
-                f"Found {candidate.record.udid} at {address}, connecting...",
-                data={"transport": "network", "host": address, "udid": candidate.record.udid},
-            )
+        raise TransportError(
+            f"the Wi-Fi connection did not open within {transport.discovery_timeout + timeout:g} s",
+            code="timeout",
+        ) from exc
+    except TransportError:
+        raise
+    except Exception as exc:
+        raise TransportError(
+            f"could not connect over Wi-Fi: {exc}", code="connection_failed"
+        ) from exc
+    on_event(
+        Event(
+            "connected",
+            "Connected over Wi-Fi.",
+            data={"transport": "wifi", "udid": record.udid},
         )
-        try:
-            return await _tcp(backend, address, candidate.record, timeout)
-        except TransportError as exc:
-            errors.append(exc)
-    raise TransportError("; ".join(map(str, errors)), code=errors[-1].code)
+    )
+    return link

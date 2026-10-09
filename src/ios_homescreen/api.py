@@ -29,7 +29,7 @@ from .events import Event, EventSink, ignore
 from .export import export_layout
 from .icons import IconCache, load_icons
 from .model import describe, to_document
-from .paths import cache_dir, data_dir, default_pair_records_dir
+from .paths import cache_dir, data_dir
 from .planner import LayoutError, LayoutIssue, Plan, load_layout, plan_layout
 from .report import read_summary
 from .snapshots import load_read, make_read, state_from_file, timestamp
@@ -42,7 +42,15 @@ from .state import (
     validate_backup,
     validate_plan,
 )
-from .transport import Backend, Transport, TransportError, load_pair_records
+from .transport import (
+    DEFAULT_DISCOVERY_TIMEOUT,
+    Backend,
+    PymobiledeviceBackend,
+    RemoteRecord,
+    Transport,
+    TransportError,
+    pick_record,
+)
 from .workflow import ApplyResult, Timing, WorkflowError, apply_state
 
 __all__ = [
@@ -66,7 +74,6 @@ __all__ = [
     "cache_dir",
     "connect",
     "data_dir",
-    "default_pair_records_dir",
     "describe",
     "export_layout",
     "fetch_icons",
@@ -197,9 +204,14 @@ async def restore(
 @dataclass(frozen=True)
 class WifiStatus:
     enabled: bool
+    """The phone's ``EnableWifiConnections`` setting."""
     device: dict[str, Any]
     pair_record: Path | None
+    """This computer's RemotePairing record for the phone (what Wi-Fi uses)."""
     pair_record_problem: str | None
+    reachable: bool | None = None
+    """Whether the phone answered on the network with that pairing; ``None``: not checked."""
+    address: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -207,34 +219,96 @@ class WifiStatus:
             "device": dict(self.device),
             "pair_record": str(self.pair_record) if self.pair_record else None,
             "pair_record_problem": self.pair_record_problem,
+            "reachable": self.reachable,
+            "address": self.address,
         }
 
 
-def _pair_record(udid: Any, directory: Path) -> tuple[Path | None, str | None]:
+def _records_for(backend: Backend, udid: Any) -> list[RemoteRecord]:
+    if not udid:
+        return []
+    wanted = str(udid).strip().lower()
+    return [r for r in backend.remote_records() if r.udid.strip().lower() == wanted]
+
+
+def _remote_record(backend: Backend, udid: Any) -> tuple[Path | None, str | None]:
     if not udid:
         return None, "the device did not report its UDID"
     try:
-        records = load_pair_records(directory, str(udid))
+        record = pick_record(backend.remote_records(), str(udid))
     except TransportError as exc:
         return None, str(exc)
-    if not records:
-        return None, f"no pair record for {udid} in {directory}"
-    return records[0].path, None
+    return record.path, None
 
 
-async def wifi_status(device: Any, pair_records: Path | None = None) -> WifiStatus:
+async def wifi_status(
+    device: Any,
+    *,
+    backend: Backend | None = None,
+    check_network: bool = True,
+    discovery_timeout: float = DEFAULT_DISCOVERY_TIMEOUT,
+) -> WifiStatus:
+    """The Wi-Fi setting, this computer's Wi-Fi pairing, and whether the phone answers
+    on the network right now (``check_network``, over USB only)."""
+    backend = backend or PymobiledeviceBackend()
     info = dict(device.info)
     enabled = await device.wifi_connections_enabled()
-    record, problem = _pair_record(info.get("udid"), pair_records or default_pair_records_dir())
-    return WifiStatus(enabled, info, record, problem)
+    record, problem = _remote_record(backend, info.get("udid"))
+    reachable, address = None, None
+    if getattr(device, "transport", "usb") == "wifi":
+        reachable = True
+    elif check_network and record is not None:
+        try:
+            address = await backend.reachable(str(info["udid"]), discovery_timeout)
+        except Exception:
+            address = None
+        reachable = address is not None
+    return WifiStatus(enabled, info, record, problem, reachable, address)
 
 
-async def set_wifi(device: Any, enabled: bool, pair_records: Path | None = None) -> WifiStatus:
-    """Turn the phone's ``EnableWifiConnections`` on or off and read it back."""
+async def set_wifi(
+    device: Any,
+    enabled: bool,
+    *,
+    backend: Backend | None = None,
+    forget: bool = False,
+    discovery_timeout: float = DEFAULT_DISCOVERY_TIMEOUT,
+) -> WifiStatus:
+    """Turn Wi-Fi access on or off.
+
+    Enabling sets the phone's ``EnableWifiConnections`` and, over USB, creates this
+    computer's RemotePairing record when it is missing (no prompt on the phone: the
+    computer is already trusted). Disabling turns the setting off; ``forget`` also
+    deletes the pairing record.
+    """
+    backend = backend or PymobiledeviceBackend()
     await device.set_wifi_connections(enabled)
-    status = await wifi_status(device, pair_records)
+    records = _records_for(backend, device.info.get("udid"))
+    if enabled and not any(r.usable for r in records):
+        if getattr(device, "transport", "usb") != "usb":
+            raise DeviceError("the Wi-Fi pairing can only be made over USB", code="needs_usb")
+        for record in records:
+            # Made by an older pymobiledevice3; it would be reused as it is.
+            record.path.unlink(missing_ok=True)
+        try:
+            await backend.pair_remote(getattr(device, "lockdown", device))
+        except Exception as exc:
+            raise DeviceError(
+                f"creating the Wi-Fi pairing failed: {exc}", code="pairing_failed"
+            ) from exc
+    if not enabled and forget:
+        for record in records:
+            record.path.unlink(missing_ok=True)
+    status = await wifi_status(
+        device, backend=backend, check_network=enabled, discovery_timeout=discovery_timeout
+    )
     if status.enabled != enabled:
         raise DeviceError("the phone did not keep the new Wi-Fi setting", code="setting_not_kept")
+    if enabled and status.pair_record is None:
+        raise DeviceError(
+            f"the Wi-Fi pairing was not created: {status.pair_record_problem}",
+            code="pairing_failed",
+        )
     return status
 
 

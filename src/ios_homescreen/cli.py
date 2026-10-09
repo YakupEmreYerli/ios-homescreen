@@ -14,11 +14,9 @@ from .events import Event
 from .paths import (
     BACKUPS,
     DATA_DIR_ENV,
-    PAIR_RECORDS_ENV,
     PLANS,
     READS,
     data_dir,
-    default_pair_records_dir,
 )
 from .report import diff_text, overview
 from .snapshots import latest, state_from_file, timestamp
@@ -99,35 +97,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     connection = argparse.ArgumentParser(add_help=False)
-    group = connection.add_argument_group("connection (USB unless --wifi or --host)")
+    group = connection.add_argument_group("connection (USB unless --wifi)")
     group.add_argument(
         "--wifi",
         action="store_true",
-        help="connect over the network; finds the phone with Bonjour unless --host is given",
-    )
-    group.add_argument(
-        "--host",
-        metavar="ADDRESS",
-        help="connect over the network to this IP address or host name (implies --wifi)",
+        help=(
+            "connect over the local network (iOS 17 or later; run 'wifi enable' over USB "
+            "once first)"
+        ),
     )
     group.add_argument(
         "--udid", metavar="UDID", help="choose the device when more than one is available"
-    )
-    group.add_argument(
-        "--pair-records",
-        type=Path,
-        metavar="DIR",
-        help=(
-            "usbmuxd pair record directory, used for network connections "
-            f"(default: {default_pair_records_dir()}; env ${PAIR_RECORDS_ENV})"
-        ),
     )
     group.add_argument(
         "--discovery-timeout",
         type=positive_number,
         default=DEFAULT_DISCOVERY_TIMEOUT,
         metavar="SECONDS",
-        help="how long to listen for Bonjour answers (default: %(default)g)",
+        help="how long to look for the phone on the network (default: %(default)g)",
     )
     group.add_argument(
         "--connect-timeout",
@@ -232,7 +219,10 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument(
         "--allow-removal",
         action="store_true",
-        help="allow removing widgets and web clips that the layout leaves out",
+        help=(
+            "allow removing widgets that the layout leaves out (web clips and web apps "
+            "cannot be removed this way; delete them on the phone)"
+        ),
     )
 
     apply = commands.add_parser(
@@ -279,12 +269,14 @@ def build_parser() -> argparse.ArgumentParser:
     wifi = commands.add_parser(
         "wifi",
         parents=[connection],
-        help="show or change whether the phone accepts Wi-Fi connections",
+        help="set up, check or turn off Wi-Fi access to the phone",
         description=(
-            "status: show the setting. enable/disable: change it. The setting "
-            "(EnableWifiConnections) lives on the phone; enabling it needs one USB "
-            "connection. Afterwards use --wifi while the phone is on the same network, "
-            "awake and unlocked."
+            "enable (over USB, once): turn on the phone's Wi-Fi connections setting and "
+            "pair this computer for Wi-Fi (RemotePairing; no prompt on the phone, no root, "
+            "no Developer Mode). status: show the setting, the pairing, and whether the "
+            "phone answers on the network now. disable: turn the setting off; with "
+            "--forget also delete this computer's Wi-Fi pairing. Afterwards use --wifi "
+            "while the phone is on the same network, awake and unlocked (iOS 17 or later)."
         ),
     )
     wifi.add_argument(
@@ -293,6 +285,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="ACTION",
         help="status, enable or disable",
     )
+    wifi.add_argument(
+        "--forget",
+        action="store_true",
+        help="with disable: also delete this computer's Wi-Fi pairing with the phone",
+    )
+
     return parser
 
 
@@ -305,10 +303,8 @@ def _data_dir(args: argparse.Namespace) -> Path:
 
 def _transport(args: argparse.Namespace) -> Transport:
     return Transport(
-        wifi=bool(args.wifi or args.host),
-        host=args.host,
+        wifi=bool(args.wifi),
         udid=args.udid,
-        pair_records=args.pair_records or default_pair_records_dir(),
         discovery_timeout=args.discovery_timeout,
         connect_timeout=args.connect_timeout,
     )
@@ -443,30 +439,50 @@ def _diff(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-async def _wifi(args: argparse.Namespace, opener: Opener) -> int:
+async def _wifi(args: argparse.Namespace, opener: Opener, backend: Any) -> int:
+    if args.forget and args.action != "disable":
+        print("error: --forget only goes with disable", file=sys.stderr, flush=True)
+        return EXIT_NOT_CONFIRMED
     transport = _transport(args)
     device = await opener(transport)
     try:
         if args.action == "status":
-            status = await api.wifi_status(device, transport.pair_records)
+            say("Checking whether the phone answers on the network...")
+            status = await api.wifi_status(
+                device, backend=backend, discovery_timeout=transport.discovery_timeout
+            )
         else:
-            status = await api.set_wifi(device, args.action == "enable", transport.pair_records)
+            if args.action == "enable":
+                say("Turning Wi-Fi access on and pairing this computer for Wi-Fi...")
+            status = await api.set_wifi(
+                device,
+                args.action == "enable",
+                backend=backend,
+                forget=args.forget,
+                discovery_timeout=transport.discovery_timeout,
+            )
     finally:
         await device.close()
     info = status.device
     say(f"Device: {_describe(info)}")
     if info.get("udid"):
         say(f"UDID: {info['udid']}")
-    if info.get("wifi_mac"):
-        say(f"Wi-Fi MAC: {info['wifi_mac']}")
-    say(f"Wi-Fi connections: {'enabled' if status.enabled else 'disabled'}")
-    say(f"Pair record for network use: {status.pair_record or status.pair_record_problem}")
+    say(f"Wi-Fi connections setting: {'on' if status.enabled else 'off'}")
+    say(f"Wi-Fi pairing: {status.pair_record or status.pair_record_problem}")
+    if status.reachable is True:
+        where = f" at {status.address}" if status.address else ""
+        say(f"On the network: answering{where}")
+    elif status.reachable is False:
+        say(
+            "On the network: not answering right now. Keep the phone awake and unlocked, "
+            "on the same network as this computer."
+        )
     if status.enabled and args.action == "enable":
         say("Use --wifi from now on while the phone is on the same network, awake and unlocked.")
     return EXIT_OK
 
 
-def _run(args: argparse.Namespace, opener: Opener) -> int:
+def _run(args: argparse.Namespace, opener: Opener, backend: Any = None) -> int:
     if args.command == "read":
         return asyncio.run(_read(args, opener))
     if args.command == "export":
@@ -487,15 +503,21 @@ def _run(args: argparse.Namespace, opener: Opener) -> int:
     if args.command == "diff":
         return _diff(args)
     if args.command == "wifi":
-        return asyncio.run(_wifi(args, opener))
+        return asyncio.run(_wifi(args, opener, backend))
     raise AssertionError(f"unhandled command {args.command!r}")
 
 
-def main(argv: list[str] | None = None, *, open_device: Opener | None = None) -> int:
-    """Entry point. ``open_device`` replaces the real connection (tests use fakes)."""
+def main(
+    argv: list[str] | None = None,
+    *,
+    open_device: Opener | None = None,
+    wifi_backend: Any = None,
+) -> int:
+    """Entry point. ``open_device`` replaces the real connection and ``wifi_backend`` the
+    Wi-Fi pairing helpers (tests use fakes)."""
     args = build_parser().parse_args(argv)
     try:
-        return _run(args, open_device or _default_opener)
+        return _run(args, open_device or _default_opener, wifi_backend)
     except (
         api.StateError,
         api.LayoutError,
