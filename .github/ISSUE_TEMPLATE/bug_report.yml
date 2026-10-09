@@ -1,0 +1,54 @@
+name: Bug report
+description: Something did not work as described.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please remove anything private from logs and files
+        (device names, UDIDs, app lists you would rather not share). Never attach
+        pair records: they contain the keys that unlock your phone.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, what you expected, what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command and output
+      description: The full command line and its output.
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Connection
+      options:
+        - USB
+        - Wi-Fi (--wifi, Bonjour discovery)
+        - Wi-Fi (--host)
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: "`ios-homescreen --version`, iPhone model and iOS version, Linux distribution, usbmuxd version."
+      placeholder: "ios-homescreen 0.1.0, iPhone 15 on iOS 26.0, Fedora 42, usbmuxd 1.1.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: state
+    attributes:
+      label: Did the phone's layout change?
+      options:
+        - "No, nothing was written"
+        - "Yes, and it was rolled back (exit code 3)"
+        - "Yes, and the rollback failed too (exit code 4)"
+        - "Not sure"
+    validations:
+      required: true
