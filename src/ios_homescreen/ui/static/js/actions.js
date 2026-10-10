@@ -204,7 +204,8 @@ export async function boot() {
   try {
     const server = await get("/api/state");
     adopt(server, { reset: true });
-    if (server.job && server.job.state === "running") await follow(server.job);
+    // The editor starts the first read itself, so it is often still running here.
+    if (server.job && server.job.state === "running") await settle(server.job);
   } catch (error) {
     setState({ boot: "ready", server: { error: { title: "Cannot reach the server", steps: [], detail: error.message } } });
   }
@@ -222,6 +223,36 @@ async function follow(job) {
     setState((state) => ({ job: state.job && { ...state.job, events: [...state.job.events, event] } })),
   );
   if (finished) setState((state) => ({ job: { ...finished, events: state.job?.events || finished.events } }));
+  return finished;
+}
+
+// Every job ends here: follow it, then take the server's state, so a failure always
+// reaches the screen (the error card, or a dialog when a layout is already shown).
+async function settle(job) {
+  const hadRead = Boolean(getState().baseline);
+  const finished = await follow(job);
+  const done = finished?.state === "done";
+  // After "applied" the phone matches the draft: start fresh from the new read.
+  const reset = job.kind === "apply" ? finished?.result?.status === "applied" : done;
+  try {
+    await reload(reset);
+  } catch (error) {
+    setState((state) => ({
+      boot: "ready",
+      server: {
+        ...(state.server || {}),
+        error: {
+          title: "Cannot reach the server",
+          steps: ["Check that ios-homescreen is still running, then reload this page."],
+          detail: error.message,
+        },
+      },
+    }));
+    return finished;
+  }
+  if (job.kind === "read" && !done && hadRead && finished?.error) {
+    setState({ dialog: { kind: "error", error: finished.error } });
+  }
   return finished;
 }
 
@@ -247,15 +278,8 @@ async function runRead() {
     toast(error.message, { tone: "error" });
     return;
   }
-  const hadRead = Boolean(getState().baseline);
-  const finished = await follow(job);
-  if (finished?.state === "done") {
-    await reload(true);
-    toast("Read the home screen from the phone.", { tone: "success" });
-  } else {
-    await reload(false);
-    if (hadRead && finished?.error) setState({ dialog: { kind: "error", error: finished.error } });
-  }
+  const finished = await settle(job);
+  if (finished?.state === "done") toast("Read the home screen from the phone.", { tone: "success" });
 }
 
 export function openApply() {
@@ -283,10 +307,7 @@ export async function startApply({ force = false } = {}) {
     return;
   }
   setState({ dialog: { kind: "job", jobKind: "apply" } });
-  const finished = await follow(job);
-  const status = finished?.result?.status;
-  // After "applied" the phone matches the draft: start fresh from the new read.
-  await reload(status === "applied");
+  await settle(job);
 }
 
 export async function restoreBackup(name) {
@@ -298,8 +319,7 @@ export async function restoreBackup(name) {
     return;
   }
   setState({ dialog: { kind: "job", jobKind: "restore", backup: name } });
-  const finished = await follow(job);
-  await reload(finished?.state === "done");
+  await settle(job);
 }
 
 export async function openBackups() {

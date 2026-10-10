@@ -74,10 +74,23 @@ def test_remote_pairing_records():
 
 
 def test_finding_the_phone_on_the_network():
-    from pymobiledevice3.remote.tunnel_service import get_remote_pairing_tunnel_services
+    from pymobiledevice3.remote.tunnel_service import (
+        RemotePairingTunnelService,
+        get_remote_pairing_tunnel_services,
+    )
 
     assert inspect.iscoroutinefunction(get_remote_pairing_tunnel_services)
     assert {"bonjour_timeout", "udid"} <= _params(get_remote_pairing_tunnel_services)
+    # A remembered address is tried directly: transport.PymobiledeviceBackend._direct.
+    assert list(inspect.signature(RemotePairingTunnelService.__init__).parameters) == [
+        "self",
+        "remote_identifier",
+        "hostname",
+        "port",
+    ]
+    assert "autopair" in _params(RemotePairingTunnelService.connect)
+    for name in ("connect", "close"):
+        assert inspect.iscoroutinefunction(getattr(RemotePairingTunnelService, name))
 
 
 def test_userspace_tunnel_takes_its_provider_from_the_module_function():

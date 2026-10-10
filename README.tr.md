@@ -332,6 +332,12 @@ bilgisayarla aynı ağda, uyanık ve kilidi açık olmalı. ios-homescreen telef
 değil eşleşmeden tanır; iOS özel ve değişen Wi-Fi adresleri kullanıyor. Bilgisayar birden çok
 telefonla eşliyse `--udid` verin.
 
+Telefon dinlemeye devam ettiği halde Bonjour cevapları bir süre gelmeyebiliyor. Bu yüzden
+ios-homescreen her başarılı Wi-Fi bağlantısından sonra telefonun cevap verdiği adresi ve portu
+hatırlar; bir sonraki bağlantıda Bonjour ile ararken o adrese doğrudan da bağlanmayı dener ve
+hangisi önce cevap verirse onu kullanır. Adresler önbellek klasöründeki `wifi-addresses.json`
+dosyasında durur; dosyayı silmek yalnız bir sonraki bağlantının Bonjour'a kalmasına yol açar.
+
 Eşleşme, pymobiledevice3'ün tuttuğu bir dosyadır: `~/.local/share/pymobiledevice3/remote_<UDID>.plist`,
 ya da bu klasör zaten varsa `~/.pymobiledevice3/`. İçinde bu bilgisayarın telefonla
 konuşmasını sağlayan anahtar var; ios-homescreen onu hiçbir yere kopyalamaz ve göndermez.
@@ -346,7 +352,7 @@ her servisi kapatıyor.
 | Ne | Varsayılan | Değiştirmek için |
 | --- | --- | --- |
 | Pull kayıtları ve yedekler | `$XDG_DATA_HOME/ios-homescreen` ya da `~/.local/share/ios-homescreen` | `--data-dir`, `IOS_HOMESCREEN_DATA_DIR` |
-| Uygulama simgeleri ve duvar kâğıdı (tarayıcı düzenleyicisi) | `$XDG_CACHE_HOME/ios-homescreen` ya da `~/.cache/ios-homescreen` | `IOS_HOMESCREEN_CACHE_DIR` |
+| Uygulama simgeleri ve duvar kâğıdı (tarayıcı düzenleyicisi), telefonun son Wi-Fi adresi | `$XDG_CACHE_HOME/ios-homescreen` ya da `~/.cache/ios-homescreen` | `IOS_HOMESCREEN_CACHE_DIR` |
 | Wi-Fi eşleşmesi (pymobiledevice3) | `$XDG_DATA_HOME/pymobiledevice3` ya da `~/.local/share/pymobiledevice3` | `XDG_DATA_HOME` |
 
 Veri klasöründe `pulls/pull-*.plist` (`pull`, `push` ve düzenleyicinin telefondan

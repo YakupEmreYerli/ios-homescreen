@@ -323,6 +323,12 @@ network as the computer, awake and unlocked. ios-homescreen looks for it with Bo
 not by its address (iOS uses private, changing Wi-Fi addresses). If this computer is paired
 with several phones, pass `--udid`.
 
+Bonjour answers often go missing for a while even though the phone is listening. So after
+every successful Wi-Fi connection ios-homescreen remembers the address and port the phone
+answered on, and next time it connects to that address directly while it browses, taking
+whichever answers first. The addresses are kept in `wifi-addresses.json` in the cache
+directory; deleting the file only makes the next connection rely on Bonjour.
+
 The pairing is a file kept by pymobiledevice3: `~/.local/share/pymobiledevice3/remote_<UDID>.plist`,
 or `~/.pymobiledevice3/` if that folder already exists. It holds the key that lets this
 computer talk to the phone; ios-homescreen never copies or sends it. `wifi off` turns the
@@ -337,7 +343,7 @@ every service on the first request.
 | What | Default | Override |
 | --- | --- | --- |
 | Pull snapshots and backups | `$XDG_DATA_HOME/ios-homescreen`, or `~/.local/share/ios-homescreen` | `--data-dir`, `IOS_HOMESCREEN_DATA_DIR` |
-| App icons and wallpaper (browser editor) | `$XDG_CACHE_HOME/ios-homescreen`, or `~/.cache/ios-homescreen` | `IOS_HOMESCREEN_CACHE_DIR` |
+| App icons and wallpaper (browser editor), the phone's last Wi-Fi address | `$XDG_CACHE_HOME/ios-homescreen`, or `~/.cache/ios-homescreen` | `IOS_HOMESCREEN_CACHE_DIR` |
 | Wi-Fi pairing (pymobiledevice3) | `$XDG_DATA_HOME/pymobiledevice3`, or `~/.local/share/pymobiledevice3` | `XDG_DATA_HOME` |
 
 Inside the data directory: `pulls/pull-*.plist` (what `pull`, `push` and the editor read

@@ -965,3 +965,41 @@ def test_a_showcase_before_layout_fills_the_change_list(showcase, tmp_path):
     }
     assert "com.apple.Health" in {app["id"] for app in state["read"]["apps"]}
     assert device.writes == []
+
+
+@pytest.mark.parametrize("showcase_mode", [False, True])
+def test_a_wifi_read_that_fails_after_the_retry_leaves_the_reason(tmp_path, showcase_mode):
+    # Both looks at the network fail: the state must carry the friendly error for the page.
+    from fakes import FakeWifiBackend
+    from ios_homescreen.transport import RemoteRecord, Transport
+
+    backend = FakeWifiBackend(
+        [RemoteRecord("UDID-1", tmp_path / "remote_UDID-1.plist", True)], answering=False
+    )
+    layout = tmp_path / "showcase.toml"
+    layout.write_text(SHOWCASE)
+    session = Session(
+        Settings(
+            data_dir=tmp_path / "data",
+            backup_dir=tmp_path / "data" / "backups",
+            timing=FAST,
+            transport=Transport(wifi=True),
+            showcase=layout if showcase_mode else None,
+        ),
+        backend=backend,
+        icons=MemoryIcons(),
+    )
+    client = TestClient(create_app(session, token=TOKEN, port=PORT), base_url=ORIGIN)
+    with client:
+        api = Api(client)
+        api.post("/api/read")
+        job = api.wait()
+        state = api.get("/api/state").json()
+
+    assert [call[0] for call in backend.calls] == ["wifi", "wifi"]
+    assert job["state"] == "failed"
+    assert job["error"]["code"] == "not_advertising"
+    assert state["read"] is None
+    assert state["error"]["code"] == "not_advertising"
+    assert state["error"]["title"] == "The iPhone did not answer on the network"
+    assert state["error"]["steps"]

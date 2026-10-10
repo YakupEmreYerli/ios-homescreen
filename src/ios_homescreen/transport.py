@@ -11,7 +11,10 @@ is not used. Instead:
    this computer. The computer is already trusted over USB, so the phone shows no prompt.
 2. The phone then advertises ``_remotepairing._tcp`` on the local network. Its
    advertisement is matched to the record by an authentication tag (not by MAC
-   address, which iOS randomises), and the record proves who we are.
+   address, which iOS randomises), and the record proves who we are. Bonjour answers
+   are unreliable on many networks (none for a while, then fine), so the address and
+   port of every successful connection are remembered per phone, and the next
+   connection tries them directly while it browses (see :func:`locate`).
 3. pymobiledevice3's userspace tunnel carries the session: a TCP/IP stack in this
    process, so no root, no ``utun`` device and no Developer Mode. The springboard and
    installation proxy services are reached through it as ``*.shim.remote``.
@@ -26,16 +29,24 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ipaddress
+import json
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
 from .events import Event, EventSink, ignore
+from .paths import cache_dir
 
 DEFAULT_DISCOVERY_TIMEOUT = 5.0
 DEFAULT_CONNECT_TIMEOUT = 30.0
 CLOSE_TIMEOUT = 10.0
+DIRECT_TIMEOUT = 5.0
+"""Time for one try at a remembered address (the browse runs alongside)."""
+ADDRESS_FILE = "wifi-addresses.json"
+MAX_ADDRESSES = 4
 
 # The key pymobiledevice3 stores the phone's alternate IRK under; without it the
 # phone's advertisement cannot be recognised (records made by old versions lack it).
@@ -102,6 +113,152 @@ class Backend(Protocol):
     async def reachable(self, udid: str, discovery_timeout: float) -> str | None: ...
 
 
+# --------------------------------------------------------------------------- finding the phone
+
+
+@dataclass(frozen=True)
+class KnownAddress:
+    """Where a phone answered RemotePairing last."""
+
+    addresses: tuple[str, ...]
+    port: int
+
+
+def _valid_address(text: Any) -> str | None:
+    if not isinstance(text, str) or not text:
+        return None
+    try:
+        ipaddress.ip_address(text.split("%", 1)[0])
+    except ValueError:
+        return None
+    return text
+
+
+class AddressMemory:
+    """The address and RemotePairing port each phone answered on last, per UDID, in
+    ``CACHE/wifi-addresses.json``. Only addresses: no keys, nothing secret."""
+
+    def __init__(self, path: Path | None = None) -> None:
+        self._path = path
+
+    @property
+    def path(self) -> Path:
+        return self._path or cache_dir() / ADDRESS_FILE
+
+    def _load(self) -> dict[str, Any]:
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        phones = data.get("phones") if isinstance(data, dict) else None
+        return phones if isinstance(phones, dict) else {}
+
+    def get(self, udid: str) -> KnownAddress | None:
+        entry = self._load().get(udid)
+        if not isinstance(entry, dict):
+            return None
+        port = entry.get("port")
+        addresses = tuple(
+            a for a in (_valid_address(x) for x in entry.get("addresses", []) or []) if a
+        )
+        if not addresses or not isinstance(port, int) or not 0 < port < 65536:
+            return None
+        return KnownAddress(addresses[:MAX_ADDRESSES], port)
+
+    def remember(self, udid: str, address: Any, port: Any) -> None:
+        """Put ``address`` first for ``udid``; earlier ones stay behind it."""
+        address = _valid_address(address)
+        if address is None or not isinstance(port, int) or not 0 < port < 65536:
+            return
+        phones = self._load()
+        known = self.get(udid)
+        earlier = [a for a in (known.addresses if known else ()) if a != address]
+        phones[udid] = {
+            "addresses": [address, *earlier][:MAX_ADDRESSES],
+            "port": port,
+            "seen": datetime.now(UTC).isoformat(timespec="seconds"),
+        }
+        path = self.path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f".{path.name}.tmp")
+        tmp.write_text(json.dumps({"version": 1, "phones": phones}, indent=2), encoding="utf-8")
+        tmp.replace(path)
+
+
+async def _close(service: Any) -> None:
+    if service is not None and hasattr(service, "close"):
+        await close_quietly(service.close)
+
+
+async def locate(
+    discovery_timeout: float,
+    *,
+    browse: Callable[[float], Awaitable[Any | None]],
+    direct: Callable[[str, int], Awaitable[Any]],
+    known: KnownAddress | None = None,
+    direct_timeout: float = DIRECT_TIMEOUT,
+) -> Any | None:
+    """Find the phone's RemotePairing service; ``None`` when nothing answered.
+
+    The remembered addresses are tried directly while Bonjour browses, and whichever
+    answers first wins; the others are stopped and anything they opened is closed. The
+    browse gets ``discovery_timeout`` seconds in two tries, because a fresh query often
+    gets the answer the first one did not.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + discovery_timeout
+
+    async def browsing() -> Any | None:
+        for attempt in (1, 2):
+            remaining = deadline - loop.time()
+            if remaining <= 0.1:
+                return None
+            window = remaining / 2 if attempt == 1 else remaining
+            try:
+                found = await browse(window)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                found = None
+            if found is not None:
+                return found
+        return None
+
+    async def trying(address: str, port: int) -> Any | None:
+        try:
+            return await asyncio.wait_for(direct(address, port), direct_timeout)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return None
+
+    tasks = {asyncio.ensure_future(browsing())}
+    if known is not None:
+        for address in known.addresses:
+            tasks.add(asyncio.ensure_future(trying(address, known.port)))
+    winner = None
+    try:
+        while tasks and winner is None:
+            done, tasks = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                found = task.result()
+                if found is None:
+                    continue
+                if winner is None:
+                    winner = found
+                else:
+                    await _close(found)
+    finally:
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            with contextlib.suppress(BaseException):
+                late = await task
+                if late is not None and late is not winner:
+                    await _close(late)
+    return winner
+
+
 _tunnel_lock: asyncio.Lock | None = None
 
 
@@ -114,6 +271,9 @@ def _lock() -> asyncio.Lock:
 
 class PymobiledeviceBackend:
     """The real connections, through pymobiledevice3."""
+
+    def __init__(self, memory: AddressMemory | None = None) -> None:
+        self.memory = memory or AddressMemory()
 
     async def usb(self, udid: str | None, pair_timeout: float) -> Any:
         from pymobiledevice3.exceptions import (
@@ -162,15 +322,44 @@ class PymobiledeviceBackend:
         finally:
             await service.close()
 
-    async def _find(self, udid: str, discovery_timeout: float) -> Any | None:
+    async def _browse(self, udid: str, window: float) -> Any | None:
         from pymobiledevice3.remote.tunnel_service import get_remote_pairing_tunnel_services
 
-        services = await get_remote_pairing_tunnel_services(
-            bonjour_timeout=discovery_timeout, udid=udid
-        )
+        services = await get_remote_pairing_tunnel_services(bonjour_timeout=window, udid=udid)
         for extra in services[1:]:
             await extra.close()
         return services[0] if services else None
+
+    async def _direct(self, udid: str, address: str, port: int) -> Any:
+        """Pair-verify with the phone at a remembered address; never starts pairing.
+
+        What ``create_core_device_tunnel_service_using_remotepairing`` does, except that a
+        cancelled attempt (the browse won) closes its connection too.
+        """
+        from pymobiledevice3.remote.tunnel_service import RemotePairingTunnelService
+
+        service = RemotePairingTunnelService(udid, address, port)
+        try:
+            await service.connect(autopair=False)
+        except BaseException:
+            await _close(service)
+            raise
+        return service
+
+    async def _find(self, udid: str, discovery_timeout: float) -> Any | None:
+        service = await locate(
+            discovery_timeout,
+            browse=lambda window: self._browse(udid, window),
+            direct=lambda address, port: self._direct(udid, address, port),
+            known=self.memory.get(udid),
+            direct_timeout=max(DIRECT_TIMEOUT, discovery_timeout),
+        )
+        if service is not None:
+            with contextlib.suppress(OSError):
+                self.memory.remember(
+                    udid, getattr(service, "hostname", None), getattr(service, "port", None)
+                )
+        return service
 
     async def reachable(self, udid: str, discovery_timeout: float) -> str | None:
         """The phone's address if it advertises RemotePairing and accepts our record."""
@@ -185,11 +374,14 @@ class PymobiledeviceBackend:
 
         # One userspace tunnel per process: open them one at a time.
         async with _lock():
+            known = self.memory.get(udid)
             service = await self._find(udid, discovery_timeout)
             if service is None:
+                tried = f"; it did not answer at {known.addresses[0]} either" if known else ""
                 raise TransportError(
-                    "the iPhone did not answer on the network. Keep it awake and unlocked "
-                    "on the same network as this computer.",
+                    f"the iPhone did not answer on the network (looked for "
+                    f"{discovery_timeout:g} s{tried}). Keep it awake and unlocked on the same "
+                    "network as this computer.",
                     code="not_advertising",
                 )
             address = str(getattr(service, "hostname", "") or "")

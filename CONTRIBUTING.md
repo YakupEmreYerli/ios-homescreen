@@ -191,8 +191,14 @@ alternative on a device.
   shows up as `RemotePairingCompletedError` and means success. Records without the phone's
   `peer_alt_irk` (made by older pymobiledevice3 versions) cannot be matched on the network;
   `wifi setup` replaces them.
+- pymobiledevice3's Bonjour browse often gets no answer for 5 to 20 seconds while the phone
+  keeps advertising on the same address and port for hours. `transport.locate` therefore
+  races a direct `RemotePairingTunnelService` connection to the address remembered from the
+  last success (`wifi-addresses.json` in the cache directory, `autopair=False`) against the
+  browse, which gets two tries within `--discovery-timeout`. Whichever answers first wins;
+  everything else is cancelled and closed.
 - The Wi-Fi session is pymobiledevice3's `UserspaceRsdTunnel` fed with the service that
-  `get_remote_pairing_tunnel_services` found. The tunnel asks a module function for its
+  `get_remote_pairing_tunnel_services` (or the direct connection) found. The tunnel asks a module function for its
   provider; `transport.py` swaps that function only for the length of `aopen()` and puts it
   back. Only one userspace tunnel can exist per process, so close a Wi-Fi device before
   opening the next one (the browser editor runs one job at a time for this reason).

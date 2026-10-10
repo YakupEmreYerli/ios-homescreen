@@ -147,15 +147,30 @@ def test_transport_description():
 @pytest.fixture
 def fake_pmd3(monkeypatch):
     """Replace the pymobiledevice3 modules the Wi-Fi backend imports."""
-    state = types.SimpleNamespace(services=[], opened=[], provider_seen=None, fail=False)
+    state = types.SimpleNamespace(
+        services=[], opened=[], provider_seen=None, fail=False, direct=[], direct_fails=False
+    )
 
     class Service:
-        def __init__(self, host):
+        def __init__(self, host, port=49152):
             self.hostname = host
+            self.port = port
             self.closed = False
 
         async def close(self):
             self.closed = True
+
+    class RemotePairingTunnelService(Service):
+        """A connection straight to a remembered address."""
+
+        def __init__(self, identifier, hostname, port):
+            super().__init__(hostname, port)
+            self.identifier = identifier
+
+        async def connect(self, autopair):
+            state.direct.append((self.hostname, self.port, autopair))
+            if state.direct_fails:
+                raise ConnectionRefusedError("nothing listens there")
 
     async def get_remote_pairing_tunnel_services(bonjour_timeout, udid):
         state.lookup = (bonjour_timeout, udid)
@@ -207,6 +222,7 @@ def fake_pmd3(monkeypatch):
 
     tunnel_service = types.ModuleType("pymobiledevice3.remote.tunnel_service")
     tunnel_service.get_remote_pairing_tunnel_services = get_remote_pairing_tunnel_services
+    tunnel_service.RemotePairingTunnelService = RemotePairingTunnelService
     tunnel_service.RemotePairingLockdownService = LockdownPairing
     exceptions = types.ModuleType("pymobiledevice3.exceptions")
     exceptions.RemotePairingCompletedError = RemotePairingCompletedError
@@ -239,7 +255,9 @@ def test_backend_tunnels_through_the_service_found_on_the_network(fake_pmd3):
 
     link = run(PymobiledeviceBackend().wifi(UDID_A, 3))
 
-    assert fake_pmd3.lookup == (3, UDID_A)
+    window, udid = fake_pmd3.lookup
+    assert udid == UDID_A
+    assert 0 < window <= 3
     assert fake_pmd3.provider_seen is found
     assert other.closed
     assert not found.closed
@@ -323,3 +341,162 @@ def test_the_marketing_name_comes_from_the_wifi_handshake():
     assert marketing_name(key_value_data, None) == "iPhone 16e"
     assert marketing_name(object(), session) == "iPhone Air"
     assert marketing_name(Unfinished(), None) is None
+
+
+# ------------------------------------------------------------------ finding the phone
+
+
+class Found:
+    """A RemotePairing service, as the browse or a direct connection returns it."""
+
+    def __init__(self, how, host="192.168.1.124", port=49152):
+        self.how = how
+        self.hostname = host
+        self.port = port
+        self.closed = False
+
+    async def close(self):
+        self.closed = True
+
+
+def locate_with(*, browse, direct, known=None, timeout=1.0, direct_timeout=0.5):
+    from ios_homescreen.transport import locate
+
+    return run(
+        locate(timeout, browse=browse, direct=direct, known=known, direct_timeout=direct_timeout)
+    )
+
+
+def test_the_remembered_address_wins_while_bonjour_is_silent():
+    from ios_homescreen.transport import KnownAddress
+
+    browses = []
+
+    async def browse(window):
+        browses.append(window)
+        await asyncio.sleep(window)  # mDNS says nothing
+        return None
+
+    async def direct(address, port):
+        return Found("direct", address, port)
+
+    found = locate_with(
+        browse=browse, direct=direct, known=KnownAddress(("192.168.1.124",), 49152), timeout=5
+    )
+
+    assert (found.how, found.hostname, found.port) == ("direct", "192.168.1.124", 49152)
+    assert len(browses) == 1  # stopped as soon as the direct try answered
+
+
+def test_a_stale_address_falls_back_to_the_browse():
+    from ios_homescreen.transport import KnownAddress
+
+    async def browse(window):
+        await asyncio.sleep(0.05)
+        return Found("browse", "192.168.1.130")
+
+    async def direct(address, port):
+        await asyncio.sleep(10)  # the old address does not answer at all
+
+    found = locate_with(browse=browse, direct=direct, known=KnownAddress(("192.168.1.124",), 49152))
+
+    assert (found.how, found.hostname) == ("browse", "192.168.1.130")
+
+
+def test_the_browse_is_tried_again_within_the_time_limit():
+    windows = []
+
+    async def browse(window):
+        windows.append(window)
+        return Found("browse") if len(windows) == 2 else None
+
+    async def direct(address, port):
+        raise AssertionError("nothing is remembered")
+
+    found = locate_with(browse=browse, direct=direct, timeout=2.0)
+
+    assert found.how == "browse"
+    assert len(windows) == 2
+    # Half the time for the first try; the second gets what is left of the limit.
+    assert windows[0] == pytest.approx(1.0, abs=0.05)
+    assert windows[1] <= 2.0
+
+
+def test_when_both_answer_the_other_connection_is_closed():
+    from ios_homescreen.transport import KnownAddress
+
+    opened = []
+
+    # Neither waits, so both have connected by the time the first result is looked at.
+    async def browse(window):
+        opened.append(Found("browse"))
+        return opened[-1]
+
+    async def direct(address, port):
+        opened.append(Found("direct", address, port))
+        return opened[-1]
+
+    found = locate_with(browse=browse, direct=direct, known=KnownAddress(("192.168.1.124",), 1))
+
+    assert len(opened) == 2
+    assert [x.closed for x in opened if x is not found] == [True]
+    assert found.closed is False
+
+
+def test_when_nothing_answers_there_is_nothing_found():
+    from ios_homescreen.transport import KnownAddress
+
+    async def browse(window):
+        return None
+
+    async def direct(address, port):
+        raise ConnectionRefusedError()
+
+    assert locate_with(browse=browse, direct=direct, known=KnownAddress(("192.0.2.1",), 1)) is None
+
+
+def test_the_backend_remembers_where_the_phone_answered_and_goes_there_next(fake_pmd3, tmp_path):
+    from ios_homescreen.transport import AddressMemory
+
+    memory = AddressMemory(tmp_path / "wifi.json")
+    fake_pmd3.services = [fake_pmd3.Service("192.168.1.124", 49152)]
+    run(run(PymobiledeviceBackend(memory).wifi(UDID_A, 1)).close())
+
+    assert memory.get(UDID_A).addresses == ("192.168.1.124",)
+    fake_pmd3.services = []  # Bonjour goes quiet
+    link = run(PymobiledeviceBackend(memory).wifi(UDID_A, 1))
+
+    assert link.address == "192.168.1.124"
+    assert fake_pmd3.direct == [("192.168.1.124", 49152, False)]  # never starts pairing
+
+
+def test_a_phone_found_nowhere_is_a_clear_error(fake_pmd3, tmp_path):
+    from ios_homescreen.transport import AddressMemory
+
+    memory = AddressMemory(tmp_path / "wifi.json")
+    memory.remember(UDID_A, "192.168.1.124", 49152)
+    fake_pmd3.direct_fails = True
+
+    with pytest.raises(TransportError) as error:
+        run(PymobiledeviceBackend(memory).wifi(UDID_A, 0.5))
+
+    assert error.value.code == "not_advertising"
+    assert "did not answer at 192.168.1.124 either" in str(error.value)
+    assert memory.get(UDID_A).addresses == ("192.168.1.124",)  # kept for next time
+
+
+def test_the_address_memory_keeps_a_few_valid_addresses_per_phone(tmp_path):
+    from ios_homescreen.transport import AddressMemory, KnownAddress
+
+    memory = AddressMemory(tmp_path / "wifi.json")
+    for host in ("192.168.1.10", "192.168.1.11", "fe80::1%en0", "192.168.1.12", "192.168.1.13"):
+        memory.remember(UDID_A, host, 49152)
+    memory.remember(UDID_A, "not an address", 49152)
+    memory.remember(UDID_B, "10.0.0.2", 0)
+
+    assert memory.get(UDID_A) == KnownAddress(
+        ("192.168.1.13", "192.168.1.12", "fe80::1%en0", "192.168.1.11"), 49152
+    )
+    assert memory.get(UDID_B) is None
+    (tmp_path / "wifi.json").write_text("garbage")
+    assert memory.get(UDID_A) is None

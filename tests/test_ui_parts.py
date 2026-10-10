@@ -433,3 +433,17 @@ def test_editor_showcase_checks_its_wallpaper_and_before_files(
 
     assert main(["editor", "--showcase", str(layout)]) == 1
     assert message in capsys.readouterr().err
+
+
+def test_every_job_the_page_follows_ends_in_the_servers_state():
+    # The editor starts the first read itself, so the page often finds it running. A job
+    # followed without reloading the state afterwards ended on an empty phone with no
+    # error (seen with a Wi-Fi read that failed after its retry).
+    actions = (STATIC / "js" / "actions.js").read_text()
+    settle = actions[actions.index("async function settle(") :]
+    settle = settle[: settle.index("\n}\n")]
+
+    assert actions.count("await follow(") == 1
+    assert "await follow(" in settle
+    assert "await reload(" in settle
+    assert actions.count("await settle(") == 4  # boot, read, apply, restore
