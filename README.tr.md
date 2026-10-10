@@ -1,7 +1,7 @@
 <h1 align="center">ios-homescreen</h1>
 
 <p align="center">
-iPhone ana ekranını Linux'ta bir metin dosyasına çekin, düzenleyin ve telefona güvenle geri yazın. USB ya da Wi-Fi ile.
+iPhone ana ekranını Linux'tan düzenleyin: gerçek simgeleri tarayıcıda sürükleyin ya da yapay zekâ ajanınıza ne istediğinizi söyleyin. USB ya da Wi-Fi ile, Mac gerekmez.
 </p>
 
 <p align="center">
@@ -15,13 +15,17 @@ iPhone ana ekranını Linux'ta bir metin dosyasına çekin, düzenleyin ve telef
 ![ios-homescreen](docs/assets/banner.tr.png)
 
 Onlarca simgeyi telefonda tek tek sürükleyerek yerleştirmek uzun sürüyor. ios-homescreen
-mevcut düzeni istediğiniz metin düzenleyicide değiştirebileceğiniz bir TOML dosyasına çeker,
-değişikliklerinizin telefonda neyi değiştireceğini gösterir ve sonucu telefona yazar. Her
-yazmadan önce size sorar, yedek alır, telefonu yeniden okuyarak sonucu doğrular; telefon
-istediğiniz düzene gelmediyse yedeği kendiliğinden geri yazar.
+bunun için iki kolay yol sunar:
 
-Simgeleri sürükleyerek çalışmayı seviyorsanız `ios-homescreen editor` aynı işi tarayıcıda
-yapar.
+- **Tarayıcıda.** `ios-homescreen editor` telefonunuzun aynasını gerçek simgeleriyle açar.
+  Uygulamaları sürükleyin, klasör kurun, değişiklik listesine bakıp Uygula'ya basın.
+- **Yapay zekâ ajanınızla.** Claude Code, Codex ya da Cursor'a bu deponun bağlantısını verin
+  ve ne istediğinizi söyleyin ("oyunlarımı 2. sayfaya al"). Ajan kurulumu yapar,
+  değişiklikleri gösterir ve onayınızı bekler.
+
+İkisi de aynı dikkatle yazar: önce yedek alınır, sonra yazılır, telefon yeniden okunup
+karşılaştırılır; tutmazsa yedek geri yazılır. Arka planda düzen düz bir TOML dosyasıdır;
+isterseniz onu çekip herhangi bir metin düzenleyicide değiştirip geri de yazabilirsiniz.
 
 ## Bir yapay zekâ asistanıyla kullanmak
 

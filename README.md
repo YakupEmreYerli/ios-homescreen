@@ -1,7 +1,7 @@
 <h1 align="center">ios-homescreen</h1>
 
 <p align="center">
-Pull your iPhone's home screen into a text file, edit it, and push it back safely from Linux, over USB or Wi-Fi.
+Rearrange your iPhone home screen from Linux: drag your real icons around in the browser, or tell your AI agent what you want. Over USB or Wi-Fi, no Mac needed.
 </p>
 
 <p align="center">
@@ -15,12 +15,17 @@ Pull your iPhone's home screen into a text file, edit it, and push it back safel
 ![ios-homescreen](docs/assets/banner.png)
 
 Rearranging dozens of icons by dragging them around on the phone is slow. ios-homescreen
-pulls the current layout into a TOML file you can edit in any text editor, shows what your
-edits would change, and pushes the result to the phone. Every push asks first, saves a
-backup, checks the result by reading the phone again, and rolls back automatically if the
-phone does not end up with the layout you asked for.
+gives you two easier ways:
 
-If you would rather drag icons around, `ios-homescreen editor` does the same in a browser.
+- **In the browser.** `ios-homescreen editor` opens a mirror of your phone with its real
+  icons. Drag apps around, make folders, see the list of changes, press Apply.
+- **With your AI agent.** Give Claude Code, Codex or Cursor the link to this repo and say
+  what you want ("put my games on page 2"). The agent sets things up, shows you the changes
+  and waits for your yes.
+
+Both write the same careful way: a backup first, then the write, then the phone is read
+again and compared; if it does not match, the backup goes back on. Under the hood the
+layout is a plain TOML file, so you can also pull it, edit it in any text editor and push it.
 
 ## Use it with an AI agent
 
