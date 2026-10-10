@@ -50,3 +50,17 @@ jobs:
           for needed in ("index.html", "app.css", "favicon.png", "logo.png", "js/main.js", "vendor/preact.mjs"):
               assert f"ios_homescreen/ui/static/{needed}" in names, needed
           PY
+
+  dependabot-merge:
+    name: Merge Dependabot security fixes
+    needs: [lint, test]
+    if: github.event_name == 'pull_request' && github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - run: gh pr merge --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
