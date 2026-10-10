@@ -13,6 +13,12 @@ from ios_homescreen.planner import plan_layout
 
 ROOT = Path(__file__).resolve().parents[1]
 READMES = ["README.md", "README.tr.md"]
+DOCS = [*READMES, "CONTRIBUTING.md", "SECURITY.md", "examples/layout.toml"]
+OLD_COMMANDS = re.compile(
+    r"ios-homescreen (read|export|plan|apply|diff|ui)\b"
+    r"|wifi (enable|disable)\b"
+    r"|`(read|apply|export|diff)`"
+)
 
 
 def _parsers() -> dict[str, argparse.ArgumentParser]:
@@ -61,11 +67,18 @@ def test_readme_layout_example_plans(readme):
 
 def test_documented_defaults_match_the_parser():
     text = (ROOT / "README.md").read_text(encoding="utf-8")
-    apply = _parsers()["apply"]
-    defaults = {a.dest: a.default for a in apply._actions}
+    push = _parsers()["push"]
+    defaults = {a.dest: a.default for a in push._actions}
 
     assert f"Re-reads used to verify the write (default {defaults['verify_attempts']})" in text
     assert f"Pause between those re-reads (default {defaults['verify_interval']:g})" in text
     assert f"(default {defaults['write_timeout']:g})" in text
     assert f"Bonjour answers (default {defaults['discovery_timeout']:g})" in text
     assert f"opening the connection (default {defaults['connect_timeout']:g})" in text
+
+
+@pytest.mark.parametrize("doc", DOCS)
+def test_the_docs_use_the_current_command_names(doc):
+    text = (ROOT / doc).read_text(encoding="utf-8")
+
+    assert OLD_COMMANDS.findall(text) == []

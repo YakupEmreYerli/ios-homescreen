@@ -38,7 +38,7 @@ jobs:
       - name: Every command's --help runs from the installed entry point
         run: |
           uv run ios-homescreen --help > /dev/null
-          for command in read export plan apply restore diff wifi ui; do
+          for command in pull check push editor backups restore wifi; do
             uv run ios-homescreen "$command" --help > /dev/null
           done
       - name: The wheel carries the browser editor's files

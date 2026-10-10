@@ -150,6 +150,48 @@ def to_document(layout: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _folders(view: Mapping[str, Any]) -> list[dict[str, Any]]:
+    items = [*view.get("dock", []), *(i for p in view.get("pages", []) for i in _page_items(p))]
+    return [item for item in items if isinstance(item, dict) and item.get("type") == "folder"]
+
+
+def _contents(folder: Mapping[str, Any]) -> set[str]:
+    return {x["id"] for page in folder.get("pages", []) for x in page if isinstance(x, Mapping)}
+
+
+def match_folders(before: Mapping[str, Any], after: dict[str, Any], prefix: str = "new") -> None:
+    """Give the folders of ``after`` the ids of the matching folders of ``before``.
+
+    Folders have no id on the phone, so two views made separately number them on their
+    own. A folder keeps its id when it keeps its name, or else when it shares the most
+    items with a folder that was renamed; other folders get ``PREFIX-...`` ids.
+    """
+    old = _folders(before)
+    new = _folders(after)
+    taken: set[str] = set()
+    matched: dict[int, str] = {}
+    for index, folder in enumerate(new):
+        for candidate in old:
+            if candidate["id"] not in taken and candidate.get("name") == folder.get("name"):
+                matched[index] = candidate["id"]
+                taken.add(candidate["id"])
+                break
+    for index, folder in enumerate(new):
+        if index in matched:
+            continue
+        inside = _contents(folder)
+        best, overlap = None, 0
+        for candidate in old:
+            shared = len(inside & _contents(candidate))
+            if candidate["id"] not in taken and shared > overlap:
+                best, overlap = candidate, shared
+        if best is not None:
+            matched[index] = best["id"]
+            taken.add(best["id"])
+    for index, folder in enumerate(new):
+        folder["id"] = matched.get(index) or f"{prefix}-{folder['id']}"
+
+
 # --------------------------------------------------------------------------- changes
 
 _SPECIAL_KINDS = frozenset({"widget", "webclip", "webapp"})

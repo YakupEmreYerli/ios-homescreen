@@ -241,7 +241,7 @@ def test_read_gives_the_view_the_apps_and_saves_the_read(make_api, tmp_path):
     assert state["device"]["name"] == "Test iPhone"
     assert state["connection"]["kind"] == "demo" or state["connection"]["label"]
     assert state["error"] is None
-    saved = sorted((tmp_path / "data" / "reads").glob("read-*.plist"))
+    saved = sorted((tmp_path / "data" / "pulls").glob("pull-*.plist"))
     assert len(saved) == 1
     assert load_plist(saved[0])["state"] == samples.home_screen()
     assert device.closed
@@ -478,7 +478,7 @@ def test_an_edit_applies_verifies_and_becomes_the_new_baseline(make_api, tmp_pat
     assert job["result"]["status"] == "applied"
     assert job["result"]["backup_name"].startswith("backup-")
     codes = [e["code"] for e in job["events"]]
-    assert codes[:2] == ["plan_saved", "reading"]
+    assert codes[0] == "reading"
     assert "verified" in codes
     written = device.writes[-1]
     assert "com.apple.mobilenotes" in written["ignored"]
@@ -489,8 +489,13 @@ def test_an_edit_applies_verifies_and_becomes_the_new_baseline(make_api, tmp_pat
     new_view = api.get("/api/state").json()["read"]["view"]
     assert api.post("/api/plan", {"layout": layout_of(new_view)}).json()["dirty"] is False
     assert [i["id"] for i in new_view["dock"]] == [i["id"] for i in layout["dock"]]
-    assert len(list((tmp_path / "data" / "plans").glob("plan-*.plist"))) == 1
-    assert len(api.get("/api/backups").json()["backups"]) == 1
+    assert not (tmp_path / "data" / "plans").exists()
+    (backup,) = api.get("/api/backups").json()["backups"]
+    assert backup["device"]["name"] == "Test iPhone"
+    # A layout exported now names the pull the editor made after the write.
+    toml = api.post("/api/export", {"layout": layout_of(new_view)}).json()["toml"]
+    newest = max(p.name for p in (tmp_path / "data" / "pulls").glob("pull-*.plist"))
+    assert f'[pull]\nsnapshot = "{newest}"' in toml
 
 
 def test_a_write_the_phone_ignores_is_rolled_back(make_api):

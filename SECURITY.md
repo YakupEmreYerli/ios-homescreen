@@ -18,20 +18,22 @@ Only the latest release gets security fixes.
 
 In scope:
 
-- Anything that makes ios-homescreen write to the phone without `--yes`, skip the backup,
-  skip verification or rollback, or send a payload other than the validated
-  `{buttonBar, iconLists, ignored}` dictionary.
+- Anything that makes ios-homescreen write to the phone without the user's yes (`y` at the
+  prompt, `--yes`, or Apply in the browser editor), skip the backup, skip verification or
+  rollback, or send a payload other than the validated `{buttonBar, iconLists, ignored}`
+  dictionary.
 - Leaking or copying pairing records. They contain the private key that lets a computer
   access the phone. ios-homescreen has pymobiledevice3 create the Wi-Fi (RemotePairing)
-  record on `wifi enable`, deletes it on `wifi disable --forget`, and otherwise only reads
+  record on `wifi setup`, deletes it on `wifi off --forget`, and otherwise only reads
   it; it must never copy or send it anywhere.
 - Anything that lets another website, another origin or another machine use the browser
-  editor (`ios-homescreen ui`), read its icons, backups or layout, or write to the phone
+  editor (`ios-homescreen editor`), read its icons, backups or layout, or write to the phone
   without the user pressing Apply or Restore and confirming.
 - Writing outside the data, cache or output paths the user chose, for example through a
   crafted file name, bundle id or layout file.
-- Crafted read, backup, plan or layout files that make the tool do something other than
-  reject them or process them as documented.
+- Crafted pull snapshots, backups or layout files that make the tool do something other than
+  reject them or process them as documented, for example a `[pull]` table that points
+  outside the data directory.
 
 Out of scope:
 
@@ -43,7 +45,8 @@ Out of scope:
 
 ## What the design already does
 
-- Writes require `--yes`, and input files are validated before any connection is opened.
+- Writes need the user's yes (the y/N prompt or `--yes`); without a terminal and without
+  `--yes` nothing connects. Input files are validated before any connection is opened.
 - The device layer refuses any payload that is not the exact safe dictionary.
 - Every write is preceded by a backup and followed by verification; a failed verification
   triggers an automatic rollback.

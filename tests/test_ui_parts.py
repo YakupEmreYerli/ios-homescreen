@@ -118,7 +118,7 @@ def _with_hidden_services():
     return read
 
 
-def test_hidden_services_stay_out_of_the_app_library_but_are_still_ignored(tmp_path):
+def test_hidden_services_stay_out_of_the_app_library_but_are_still_ignored():
     read = _with_hidden_services()
 
     view = describe(read)
@@ -128,8 +128,9 @@ def test_hidden_services_stay_out_of_the_app_library_but_are_still_ignored(tmp_p
     assert "com.apple.AirDropUI" not in library
     assert "com.apple.tips" in library
     assert {"com.apple.AirDropUI", "com.apple.SettingsHost"} <= set(plan.payload["ignored"])
-    summary = api.save_read(read, tmp_path).summary_path.read_text()
-    assert "AirDropUI" not in summary
+    exported = api.export_layout(read)
+    assert "AirDropUI" not in exported
+    assert '#   "com.apple.tips",  # tips' in exported
 
 
 def test_hidden_services_are_not_offered_by_name():
@@ -190,9 +191,9 @@ def test_demo_phone_takes_a_safe_write(tmp_path):
     plan = plan_layout(to_document(view), snapshot)
 
     result = run(
-        api.apply_plan(
+        api.push(
             device,
-            plan.payload,
+            plan,
             backup_dir=tmp_path,
             timing=api.Timing(verify_attempts=1, verify_interval=0),
         )
@@ -323,9 +324,9 @@ def test_the_page_has_no_inline_code_besides_the_import_map():
 # ------------------------------------------------------------------ the command
 
 
-def test_ui_help_lists_the_connection_and_ui_options(capsys):
+def test_editor_help_lists_the_connection_and_editor_options(capsys):
     with pytest.raises(SystemExit):
-        main(["ui", "--help"])
+        main(["editor", "--help"])
 
     text = capsys.readouterr().out
     for flag in ("--wifi", "--udid", "--port", "--no-browser", "--demo", "--verify-attempts"):
@@ -333,7 +334,7 @@ def test_ui_help_lists_the_connection_and_ui_options(capsys):
     assert "--yes" not in text
 
 
-def test_ui_without_the_web_dependencies_explains_how_to_install(monkeypatch, capsys):
+def test_editor_without_the_web_dependencies_explains_how_to_install(monkeypatch, capsys):
     import ios_homescreen.ui as ui
 
     def missing(options, say):
@@ -341,11 +342,11 @@ def test_ui_without_the_web_dependencies_explains_how_to_install(monkeypatch, ca
 
     monkeypatch.setattr(ui, "serve", missing)
 
-    assert main(["ui", "--demo", "--no-browser"]) == 1
+    assert main(["editor", "--demo", "--no-browser"]) == 1
     assert "needs Starlette and uvicorn" in capsys.readouterr().err
 
 
-def test_ui_passes_the_options_through(monkeypatch, tmp_path):
+def test_editor_passes_the_options_through(monkeypatch, tmp_path):
     import ios_homescreen.ui as ui
 
     seen = []
@@ -353,7 +354,7 @@ def test_ui_passes_the_options_through(monkeypatch, tmp_path):
 
     main(
         [
-            "ui",
+            "editor",
             "--wifi",
             "--udid",
             "U",

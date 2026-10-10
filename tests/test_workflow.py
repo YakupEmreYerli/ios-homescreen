@@ -201,7 +201,7 @@ def test_rollback_that_cannot_be_verified_is_reported_and_the_backup_kept(tmp_pa
 
     assert result.status == ROLLBACK_FAILED
     assert not result.rollback_verified
-    assert load_plist(result.backup) == start
+    assert load_plist(result.backup)["state"] == start
     assert events[-1].code == "rollback_failed"
     assert events[-1].level == "error"
 
@@ -260,7 +260,7 @@ def test_restoring_after_the_accident_keeps_31_apps_in_the_app_library(tmp_path)
     assert result.status == APPLIED
     assert same_layout(after, original)
     assert not extra & visible_apps(after)
-    assert load_plist(result.backup) == broken
+    assert load_plist(result.backup)["state"] == broken
 
 
 def test_progress_events_have_stable_codes_and_serialize_to_json(tmp_path):

@@ -7,7 +7,7 @@ network lockdown (port 62078, found through ``_apple-mobdev2._tcp``) still answe
 current iOS versions, but the phone closes every service on the first request, so it
 is not used. Instead:
 
-1. ``ios-homescreen wifi enable``, over USB once, creates a RemotePairing record on
+1. ``ios-homescreen wifi setup``, over USB once, creates a RemotePairing record on
    this computer. The computer is already trusted over USB, so the phone shows no prompt.
 2. The phone then advertises ``_remotepairing._tcp`` on the local network. Its
    advertisement is matched to the record by an authentication tag (not by MAC
@@ -225,7 +225,7 @@ def pick_record(records: list[RemoteRecord], udid: str | None) -> RemoteRecord:
         which = f" with {udid}" if udid else ""
         raise TransportError(
             f"this computer has no Wi-Fi pairing{which} yet. Connect the iPhone with a cable "
-            "once and run 'ios-homescreen wifi enable'.",
+            "once and run 'ios-homescreen wifi setup'.",
             code="no_pair_record",
         )
     if len(records) > 1:
@@ -240,7 +240,7 @@ def pick_record(records: list[RemoteRecord], udid: str | None) -> RemoteRecord:
         raise TransportError(
             f"the Wi-Fi pairing in {record.path} was made by an older pymobiledevice3 and "
             "cannot be used. Connect the iPhone with a cable and run "
-            "'ios-homescreen wifi enable' again.",
+            "'ios-homescreen wifi setup' again.",
             code="stale_pair_record",
         )
     return record

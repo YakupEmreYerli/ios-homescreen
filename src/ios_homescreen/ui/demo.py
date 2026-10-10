@@ -1,4 +1,4 @@
-"""A pretend iPhone for ``ios-homescreen ui --demo``.
+"""A pretend iPhone for ``ios-homescreen editor --demo``.
 
 Every app, widget and web clip here is invented, with ``com.example.*`` ids and the
 generated icons from :mod:`.demo_icons`. :class:`DemoDevice` answers like the real

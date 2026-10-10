@@ -19,7 +19,10 @@ body:
     id: command
     attributes:
       label: Command and output
-      description: The full command line and its output.
+      description: >-
+        The full command line and its output, for example of `ios-homescreen push`.
+        If the layout file matters, attach it (it lists your app names; remove what you
+        would rather not share).
       render: text
     validations:
       required: true

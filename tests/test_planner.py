@@ -69,10 +69,13 @@ def test_export_plans_back_to_the_same_layout():
 def test_export_of_a_full_home_screen_round_trips_exactly():
     read = samples.read_snapshot()
 
-    text = export_layout(read, source="read-20260101-000000-000000.plist")
+    text = export_layout(read, pull="pull-20260101-000000-000000.plist", note="Pulled from a test.")
     plan = plan_layout(text, read)
 
-    tomllib.loads(text)
+    assert tomllib.loads(text)["pull"] == {"snapshot": "pull-20260101-000000-000000.plist"}
+    assert "#\n# Pulled from a test.\n" in text
+    assert plan.unchanged
+    assert plan.changes == "No changes."
     assert same_layout(plan.payload, read["state"])
     assert plan.to_library == ()
     assert plan.to_home_screen == ()
@@ -397,9 +400,56 @@ def test_change_summary_lists_moves_and_counts():
 
     plan = plan_layout(layout, _read())
 
-    assert "Moved: com.a: dock -> page 1" in plan.changes
-    assert "Moved: com.b: page 1 -> dock" in plan.changes
-    assert "Apps kept off the home screen (ignored): 1" in plan.changes
+    assert [(c["kind"], c["id"]) for c in plan.change_list] == [
+        ("moved", "com.b"),
+        ("moved", "com.a"),
+    ]
+    assert "  A  moves from the dock to page 1, position 1" in plan.changes
+    assert "  B  moves from page 1 to the dock, position 1" in plan.changes
+    assert plan.changes.endswith("\n2 moved.")
+    assert plan.ignored_count == 1
+
+
+def test_the_pull_and_showcase_tables_are_accepted_and_ignored_for_planning():
+    layout = (
+        '[pull]\nsnapshot = "pull-20261010-000000-000000.plist"\n'
+        '[showcase]\nlibrary = ["C", "com.a"]\n' + KEEP_SPECIALS + '[dock]\nitems = ["A"]\n'
+    )
+
+    plan = plan_layout(layout, _read())
+
+    assert set(plan.payload) == {"buttonBar", "iconLists", "ignored", PLAN_META_KEY}
+    assert plan.to_library == ("com.b",)
+
+
+@pytest.mark.parametrize(
+    ("tables", "message"),
+    [
+        ("[pull]\nsnapshot = 1\n", "[pull] snapshot has the wrong type"),
+        ('[pull]\nsnaphot = "x.plist"\n', "unknown key(s) in [pull]: snaphot"),
+        ("pull = 3\n", "pull must be a table"),
+        ('[showcase]\nlibary = ["A"]\n', "unknown key(s) in [showcase]: libary"),
+        ('[showcase]\nlibrary = "A"\n', "[showcase] library has the wrong type"),
+        ('[showcase]\nlibrary = ["A", 3]\n', "[showcase] library must list app names or ids"),
+        ("[dok]\n", "unknown top-level key(s): dok"),
+    ],
+)
+def test_typos_in_the_extra_tables_are_errors(tables, message):
+    with pytest.raises(LayoutError) as error:
+        plan_layout(tables + KEEP_SPECIALS, _read(), allow_removal=True)
+
+    assert message in str(error.value)
+
+
+def test_a_renamed_folder_is_recognised_by_what_it_holds():
+    read = samples.read_snapshot()
+    text = export_layout(read).replace('name = "Utilities"', 'name = "Tools"')
+
+    plan = plan_layout(text, read)
+
+    assert [(c["kind"], c["name"]) for c in plan.change_list] == [("folder_renamed", "Tools")]
+    assert plan.change_list[0]["old_name"] == "Utilities"
+    assert 'Folder "Tools"  was "Utilities"' in plan.changes
 
 
 def example_read() -> dict:

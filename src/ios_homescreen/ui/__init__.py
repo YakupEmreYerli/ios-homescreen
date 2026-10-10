@@ -1,4 +1,4 @@
-"""Browser UI: ``ios-homescreen ui`` serves an editor on 127.0.0.1 and opens it.
+"""Browser UI: ``ios-homescreen editor`` serves an editor on 127.0.0.1 and opens it.
 
 Starlette and uvicorn are imported only here, when the UI starts; the CLI and the
 Python API do not need them. The page itself is plain JavaScript modules with a
@@ -45,7 +45,7 @@ def _require() -> None:
         import uvicorn  # noqa: F401
     except ImportError as exc:
         raise UIUnavailable(
-            "the browser UI needs Starlette and uvicorn: "
+            "the browser editor needs Starlette and uvicorn: "
             "pip install 'ios-homescreen[ui]' (or uv tool install, pipx install)"
         ) from exc
 
@@ -126,9 +126,9 @@ def serve(options: Options, *, say: Callable[[str], None] = print) -> int:
             if server.started:
                 session.start_read()
                 if options.demo:
-                    say("ios-homescreen UI, demo mode: a pretend iPhone, no phone is contacted")
+                    say("ios-homescreen editor, demo mode: a pretend iPhone, no phone is contacted")
                 else:
-                    say("ios-homescreen UI")
+                    say("ios-homescreen editor")
                 say(f"Open: {url}")
                 say("The address works for this run only. Press Ctrl+C to stop.")
                 if options.open_browser:

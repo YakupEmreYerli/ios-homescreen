@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from .events import ERROR, WARNING, Event, EventSink, ignore
-from .snapshots import timestamp
+from .snapshots import make_backup, timestamp
 from .state import PLAN_META_KEY, fingerprint, safe_payload, same_layout, save_plist
 
 APPLIED = "applied"
@@ -114,6 +114,7 @@ async def apply_state(
     """Back up, write ``target`` safely, prove it by re-reading, roll back if needed.
 
     ``target`` is a plan payload (with a source fingerprint) or a plain state to restore.
+    The backup records the layout as read and the device's ``info`` when it has one.
     Raises :class:`WorkflowError` before anything is written if a precondition fails.
     """
     timing = timing or Timing()
@@ -130,15 +131,18 @@ async def apply_state(
     installed = await _timed(
         device.installed_apps(), timing.read_timeout, "Reading the installed apps"
     )
-    backup = save_plist(Path(backup_dir) / f"backup-{timestamp()}.plist", current)
+    backup = save_plist(
+        Path(backup_dir) / f"backup-{timestamp()}.plist",
+        make_backup(current, device=getattr(device, "info", None)),
+    )
     emit("backup_saved", f"Backup: {backup}", path=backup)
 
     meta = target.get(PLAN_META_KEY)
     source = meta.get("source_fingerprint") if isinstance(meta, Mapping) else None
     if source and source != fingerprint(current) and not force:
         raise WorkflowError(
-            "the device layout changed since the read this plan was made from; nothing "
-            "was written. Read again and re-plan, or pass --force to write anyway.",
+            "the phone's layout changed since the pull this layout was made from; nothing "
+            "was written. Pull again, or push with --force to write anyway.",
             code="layout_changed",
         )
 

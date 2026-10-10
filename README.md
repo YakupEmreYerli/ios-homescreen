@@ -1,7 +1,7 @@
 <h1 align="center">ios-homescreen</h1>
 
 <p align="center">
-Read your iPhone's home screen, plan a new layout in a text file, and write it back safely from Linux, over USB or Wi-Fi.
+Pull your iPhone's home screen into a text file, edit it, and push it back safely from Linux, over USB or Wi-Fi.
 </p>
 
 <p align="center">
@@ -15,30 +15,33 @@ Read your iPhone's home screen, plan a new layout in a text file, and write it b
 ![ios-homescreen](docs/assets/banner.png)
 
 Rearranging dozens of icons by dragging them around on the phone is slow. ios-homescreen
-saves the current layout to your computer, turns it into a TOML file you can edit in any
-text editor, checks your edits offline, and writes the result to the phone. Every write is
-backed up first, verified by reading the phone again, and rolled back automatically if the
+pulls the current layout into a TOML file you can edit in any text editor, shows what your
+edits would change, and pushes the result to the phone. Every push asks first, saves a
+backup, checks the result by reading the phone again, and rolls back automatically if the
 phone does not end up with the layout you asked for.
 
-If you would rather drag icons around, `ios-homescreen ui` does the same in a browser editor.
+If you would rather drag icons around, `ios-homescreen editor` does the same in a browser.
 
 ## Features
 
-- Exports the dock, pages, folders (including multi-page folders), widgets, widget stacks,
-  web clips, Safari web apps and offloaded apps to an editable TOML file.
+- Pulls the dock, pages, folders (including multi-page folders), widgets, widget stacks,
+  web clips, Safari web apps and offloaded apps into an editable TOML file, and lists the
+  apps that are only in the App Library at the end of it.
 - Refers to apps by bundle id or by the name under the icon.
 - Checks a layout before anything touches the phone: unknown or duplicate items, a full dock,
   pages over 24 cells (widgets count by size), empty or nested folders, widgets in folders.
 - Apps you leave out of the layout go to the App Library and stay there.
 - Shows what will move, what goes to the App Library and what comes back before you write.
-- Writes only with an explicit `--yes`, after a backup, and checks the result by reading the
-  phone again. If the check fails, the backup is written back.
+- Refuses to push when the phone was changed since the pull, asks before every write, saves
+  a backup, and checks the result by reading the phone again. If the check fails, the backup
+  is written back. `ios-homescreen restore latest` undoes a push.
 - Works over USB, or over Wi-Fi (iOS 17 and later) after a one-time setup over USB. Neither
   needs root or Developer Mode.
-- Keeps reads, backups and plans in `~/.local/share/ios-homescreen`, not in the current directory.
-- Has a browser editor (`ios-homescreen ui`): drag apps, folders and widgets on a picture
-  of your home screen, see every change before it is written, and apply it with the same
-  safety steps. A demo mode needs no phone.
+- Keeps pull snapshots and backups in `~/.local/share/ios-homescreen`; only the layout file
+  goes where you say.
+- Has a browser editor (`ios-homescreen editor`): drag apps, folders and widgets on a
+  picture of your home screen, see every change before it is written, and apply it with
+  the same safety steps. A demo mode needs no phone.
 - Can be used from Python: the CLI is a thin layer over `ios_homescreen.api`.
 
 ## Requirements
@@ -83,67 +86,69 @@ uv run ios-homescreen --help
 ## Quick start
 
 ```bash
-# 1. Save the current layout. Read-only; nothing is written to the phone.
-ios-homescreen read
+# 1. Read the phone into layout.toml. Read-only; nothing is written to the phone.
+ios-homescreen pull
 
-# 2. Turn the newest read into a layout file and edit it.
-ios-homescreen export -o layout.toml
+# 2. Edit it: move lines around, add apps from the list at the end, make folders.
 $EDITOR layout.toml
 
-# 3. Check the layout and see what would change. Offline.
-ios-homescreen plan layout.toml -o plan.plist
+# 3. See what would change. Offline.
+ios-homescreen check
 
-# 4. Write it. Backup, write, verify, and roll back if needed.
-ios-homescreen apply plan.plist --yes
+# 4. Write it. push shows the changes and asks; then backup, write, verify, roll back if needed.
+ios-homescreen push
 ```
 
-To undo, restore the backup that `apply` printed:
+To undo a push, write back the backup it made:
 
 ```bash
-ios-homescreen restore ~/.local/share/ios-homescreen/backups/backup-20261010-101500-000000.plist --yes
+ios-homescreen restore latest
 ```
 
 ## Commands
 
 | Command | What it does | Talks to the phone |
 | --- | --- | --- |
-| `read` | Saves the layout and the installed apps as a read snapshot, plus a text summary | Reads only |
-| `export [READ]` | Prints the layout of a read (the newest by default) as TOML, or writes it with `-o FILE` | No |
-| `plan LAYOUT` | Checks a layout against a read (`--read`, newest by default), shows the changes and saves a plan | No |
-| `apply PLAN --yes` | Backs up, writes the plan, verifies it and rolls back on failure | Writes |
-| `restore BACKUP --yes` | Writes a backup or read snapshot back, with the same safety steps | Writes |
-| `diff BEFORE AFTER` | Compares two saved layouts (reads, backups, plans, or plist/JSON state dumps) | No |
-| `wifi status\|enable\|disable` | Sets up, checks or turns off Wi-Fi access to the phone | Yes |
-| `ui` | Opens the browser editor on 127.0.0.1 | Reads; writes only when you press Apply |
+| `pull [LAYOUT]` | Reads the home screen into a layout file (`layout.toml` by default) and keeps the phone's state as a snapshot | Reads only |
+| `check [LAYOUT]` | Checks the file and lists what `push` would change, compared with the pull | No |
+| `push [LAYOUT]` | Shows the changes, asks, then backs up, writes, verifies and rolls back on failure | Writes |
+| `editor` | Opens the browser editor on 127.0.0.1 | Reads; writes only when you press Apply |
+| `backups` | Lists the backups made before each write: when, which iPhone, what the layout held | No |
+| `restore BACKUP` | Writes a backup back (`latest`, a name from `backups`, or a file), with the same steps as `push` | Writes |
+| `wifi setup\|status\|off` | Sets up, checks or turns off Wi-Fi access to the phone | Yes |
 
-Options for `export` and `plan`: `-o/--output FILE`, and `--allow-removal` for `plan` (see the
-layout reference). `read` takes `-o/--output DIR`. `apply` takes `--force` (see the safety model).
-Every command except `diff` and `wifi` takes `--data-dir DIR`.
+`pull` will not replace a layout file that has edits you have not pushed; pull into another
+file, or pass `--overwrite`. `check` and `push` take `--allow-removal` (see the layout
+reference); `push` and `restore` take `--force` (see the safety model). `backups` shows the 20
+newest; `--all` lists every one. Every command except `wifi` takes `--data-dir DIR`;
+`push`, `restore`, `editor` and `backups` also take `--backup-dir DIR`.
 
-Connection options, for `read`, `apply`, `restore`, `wifi` and `ui`:
+Connection options, for `pull`, `push`, `restore`, `editor` and `wifi`:
 
 | Option | Meaning |
 | --- | --- |
 | *(none)* | USB through usbmuxd |
-| `--wifi` | Wi-Fi (iOS 17 or later); run `wifi enable` over USB once first |
+| `--wifi` | Wi-Fi (iOS 17 or later); run `wifi setup` over USB once first |
 | `--udid UDID` | Pick a device when several are connected or paired |
 | `--discovery-timeout SECONDS` | How long to listen for Bonjour answers (default 5) |
 | `--connect-timeout SECONDS` | Time limit for opening the connection (default 30) |
 
-Write options, for `apply` and `restore` (and for `ui`, except `--yes`):
+Write options, for `push` and `restore` (and for `editor`, except `--yes`):
 
 | Option | Meaning |
 | --- | --- |
-| `--yes` | Required. Without it the phone is not contacted at all |
+| `-y`, `--yes` | Write without asking. Needed when there is no terminal to ask in (scripts, pipes) |
 | `--backup-dir DIR` | Where the automatic backup goes (default `DATA_DIR/backups`) |
 | `--verify-attempts N` | Re-reads used to verify the write (default 6) |
 | `--verify-interval SECONDS` | Pause between those re-reads (default 3) |
 | `--write-timeout SECONDS` | Time limit for sending the layout (default 10) |
 | `--read-timeout SECONDS` | Time limit for each read (default 30) |
 
-Exit codes: `0` done; `1` error (`apply` and `restore` stop before writing); `2` usage error
-or `--yes` missing; `3` the new layout did not verify and the backup was restored; `4` the
-restore did not verify either. The backup file is kept in every case.
+Exit codes: `0` done (or nothing to do); `1` error, nothing was written (this includes a
+phone that changed since the pull); `2` usage error, or the write was not confirmed (you
+answered no, or there was no terminal and no `--yes`); `3` the new layout did not verify
+and the backup was written back; `4` that did not verify either. The backup file is kept
+in every case.
 
 ## Layout file
 
@@ -170,8 +175,15 @@ items = ["Health", "Wallet"]
 ```
 
 [`examples/layout.toml`](examples/layout.toml) is a complete example with Apple's stock apps.
-Start from `export` instead: it fills in your real ids and adds a comment with the name of
-every item.
+Start from `pull` instead: it fills in your real ids, adds a comment with the name of every
+item, and lists the apps that are only in the App Library at the end of the file, ready to
+copy into a page.
+
+The `[pull]` table at the top of a pulled file names the snapshot it came from
+(`snapshot = "pull-....plist"` in `DATA_DIR/pulls`). `check` and `push` compare the file
+with it; leave it as it is. A file without it is compared with the newest pull. After a
+successful push, `push` saves the phone's new state and points the table at it, so the
+file and the phone are in step again.
 
 | Item | How to write it | Notes |
 | --- | --- | --- |
@@ -188,48 +200,62 @@ Rules the planner enforces:
 - Each item appears once. Two widgets from the same app are different items with different ids.
 - Folders need a name and at least one item, and cannot contain folders or widgets.
 - Widgets, web clips and web apps can be moved, but a layout file cannot create them: they
-  are referenced by the id they had in the read, and the planner copies the phone's own data
-  for them unchanged. Leaving out a widget is an error unless you pass `plan --allow-removal`.
+  are referenced by the id they had in the pull, and the planner copies the phone's own data
+  for them unchanged. Leaving out a widget is an error unless you pass `--allow-removal` to
+  `check` and `push`.
 - Web clips and Safari web apps cannot be removed by a write at all. When a written layout
   leaves one out, the phone puts it back on a new last page, the check after writing fails
   and the backup is restored. So the planner refuses such a layout (code `not_removable`),
   even with `--allow-removal`. Delete them on the phone (touch and hold, then Delete
-  Bookmark), then `read` again.
+  Bookmark), then `pull` again.
 - Every installed app that is not in the layout goes to the App Library.
 - Unknown keys are errors, so a typo such as `itmes` does not silently empty a page.
 
-`plan` reports every problem it finds with its place, for example
-`page 2, item 5: unknown app 'Mpas'`.
+`check` (and `push`, before it connects) reports every problem it finds with its place, for
+example `page 2, item 5: unknown app 'Mpas'`. What would change is listed in plain words:
+
+```text
+layout.toml is valid.
+Changes compared with the pull from iPhone (iPhone 15, iOS 27.0) on 2026-10-10 14:44:
+
+  Camera          moves from the dock to page 2, position 1
+  Tips            comes from the App Library to page 2, position 2
+  Folder "Tools"  was "Utilities"
+
+1 moved, 1 added and 1 renamed.
+30 apps will be only in the App Library.
+```
 
 ## Browser editor
 
 ![The browser editor in demo mode](docs/assets/ui.png)
 
-`ios-homescreen ui` reads the phone and opens an editor in your browser. Drag apps, folders
-and widgets around the picture of the home screen, between pages and into the dock. Drop an
-app on another one to make a folder; click a folder to open it, rename it, and drag apps in
-or out. The App Library on the left lists the apps that are installed but not on the home
-screen: drag them in, or drag apps there to take them off the home screen. The right side
-lists every change compared with the last read and checks the layout with the same rules as
-`plan` while you edit.
+`ios-homescreen editor` reads the phone and opens an editor in your browser. Drag apps,
+folders and widgets around, between pages and into the dock. Drop an app on another one to
+make a folder; click a folder to open it, rename it, and drag apps in or out. The App
+Library on the left lists the apps that are installed but not on the home screen: drag
+them in, or drag apps there to take them off the home screen. The right side lists every
+change compared with the last read and checks the layout with the same rules as `check`
+while you edit.
 
-Apply asks for confirmation, then runs the same steps as `apply`: backup, write, read back,
+Apply asks for confirmation, then runs the same steps as `push`: backup, write, read back,
 roll back if it does not match. The progress and the result show in the page. Backups lists
-the automatic backups and restores one the same way. Import and Export load and save the TOML
-layout file, so you can switch between the editor and a text editor.
+the automatic backups and restores one the same way. Import and Export load and save the
+TOML layout file, so you can switch between the editor and a text editor; an exported file
+works with `check` and `push`.
 
 ```bash
-ios-homescreen ui              # over USB; add --wifi for Wi-Fi
-ios-homescreen ui --demo       # a pretend iPhone with made-up apps
+ios-homescreen editor          # over USB; add --wifi for Wi-Fi
+ios-homescreen editor --demo   # a pretend iPhone with made-up apps
 ```
 
 | Option | Meaning |
 | --- | --- |
 | `--port PORT` | Port on 127.0.0.1 (default: any free port) |
 | `--no-browser` | Only print the address; do not open a browser |
-| `--demo` | Use a pretend iPhone; nothing connects to a phone, and reads, backups and plans go to a temporary folder |
+| `--demo` | Use a pretend iPhone; nothing connects to a phone, and snapshots and backups go to a temporary folder |
 
-The connection and write options work as for `apply`. `--yes` is not needed: the editor asks.
+The connection and write options work as for `push`. `--yes` is not needed: the editor asks.
 
 The editor listens on 127.0.0.1 only. The address it prints contains a key that changes on
 every start; the page trades it for a cookie, and every request has to carry the key and come
@@ -253,36 +279,40 @@ this tool was being built. The design works around both.
    request itself with a time limit and treats a missing reply as "unknown". The proof is a
    fresh read of the phone that matches the plan.
 
-Every `apply` and `restore` runs the same steps:
+Every `push` and `restore` runs the same steps:
 
-1. Read the current layout and save it as a timestamped backup.
-2. Stop if the layout differs from the read the plan was made from (the phone was changed in
-   the meantime). `--force` skips this check. `restore` has no such check.
-3. Send the layout with a time limit.
-4. Read the layout again on a new connection, up to `--verify-attempts` times, and compare it
-   with the plan: kinds, ids and order on every page and in every folder.
-5. If it never matches, write the backup back the same way and verify that too.
+1. Check the file offline, before connecting. A layout with problems never reaches the phone.
+2. Connect and read the layout. `push` stops if it differs from the pull the file was made
+   from (the phone was changed in the meantime); `--force` writes anyway. `restore` stops if
+   the backup was made on another iPhone; `--force` restores it anyway.
+3. Show what will change and ask. Only `y` or `yes` goes on. Without a terminal to ask in,
+   the command needs `--yes`, and without it exits with code 2 before connecting.
+4. Read the layout again and save it as a timestamped backup, with the iPhone's name and
+   UDID. The phone-changed check runs again on this read.
+5. Send the layout with a time limit.
+6. Read the layout again on a new connection, up to `--verify-attempts` times, and compare it
+   with what was sent: kinds, ids and order on every page and in every folder.
+7. If it never matches, write the backup back the same way and verify that too.
 
-Without `--yes`, `apply` and `restore` only check the file and exit with code 2; they do not
-connect to the phone. Reads, backups and plans are binary plists because the layout contains
-dates and binary data that JSON would lose.
+Snapshots and backups are binary plists because the layout contains dates and binary data
+that JSON would lose.
 
 ## Wi-Fi
 
 Wi-Fi needs iOS 17 or later. Set it up once, with the phone connected over USB:
 
 ```bash
-ios-homescreen wifi enable     # over USB, once
+ios-homescreen wifi setup      # over USB, once
 ios-homescreen wifi status     # the setting, the pairing, and whether the phone answers on Wi-Fi
 ```
 
-`wifi enable` turns on the phone's Wi-Fi connections setting and pairs this computer for
+`wifi setup` turns on the phone's Wi-Fi connections setting and pairs this computer for
 Wi-Fi with RemotePairing, the mechanism Xcode uses for wireless devices. The computer is
 already trusted over USB, so the phone shows no prompt. Root, Developer Mode and a tunnel
 service are not needed: the connection runs through pymobiledevice3's userspace network stack
 inside the ios-homescreen process.
 
-After that, add `--wifi` to `read`, `apply`, `restore` or `ui`. The phone must be on the same
+After that, add `--wifi` to `pull`, `push`, `restore` or `editor`. The phone must be on the same
 network as the computer, awake and unlocked. ios-homescreen looks for it with Bonjour
 (`_remotepairing._tcp`) for `--discovery-timeout` seconds and recognises it by the pairing,
 not by its address (iOS uses private, changing Wi-Fi addresses). If this computer is paired
@@ -290,8 +320,8 @@ with several phones, pass `--udid`.
 
 The pairing is a file kept by pymobiledevice3: `~/.local/share/pymobiledevice3/remote_<UDID>.plist`,
 or `~/.pymobiledevice3/` if that folder already exists. It holds the key that lets this
-computer talk to the phone; ios-homescreen never copies or sends it. `wifi disable` turns the
-phone's setting off, and `wifi disable --forget` also deletes the pairing file.
+computer talk to the phone; ios-homescreen never copies or sends it. `wifi off` turns the
+phone's setting off, and `wifi off --forget` also deletes the pairing file.
 
 The older way of reaching a phone over the network, lockdown on port 62078 found as
 `_apple-mobdev2._tcp`, is not used: current iOS versions accept that connection but close
@@ -301,13 +331,13 @@ every service on the first request.
 
 | What | Default | Override |
 | --- | --- | --- |
-| Reads, backups, plans | `$XDG_DATA_HOME/ios-homescreen`, or `~/.local/share/ios-homescreen` | `--data-dir`, `IOS_HOMESCREEN_DATA_DIR` |
-| App icon cache (browser editor, Python API) | `$XDG_CACHE_HOME/ios-homescreen`, or `~/.cache/ios-homescreen` | `IOS_HOMESCREEN_CACHE_DIR` |
+| Pull snapshots and backups | `$XDG_DATA_HOME/ios-homescreen`, or `~/.local/share/ios-homescreen` | `--data-dir`, `IOS_HOMESCREEN_DATA_DIR` |
+| App icons and wallpaper (browser editor) | `$XDG_CACHE_HOME/ios-homescreen`, or `~/.cache/ios-homescreen` | `IOS_HOMESCREEN_CACHE_DIR` |
 | Wi-Fi pairing (pymobiledevice3) | `$XDG_DATA_HOME/pymobiledevice3`, or `~/.local/share/pymobiledevice3` | `XDG_DATA_HOME` |
 
-Inside the data directory: `reads/read-*.plist` with a `.txt` summary next to each,
-`backups/backup-*.plist` and `plans/plan-*.plist`. Nothing is written to the current
-directory unless you pass a path there.
+Inside the data directory: `pulls/pull-*.plist` (what `pull`, `push` and the editor read
+from the phone) and `backups/backup-*.plist`. The only file written elsewhere is the layout
+file `pull` writes: `layout.toml` in the current directory, or the path you give.
 
 ## Python API
 
@@ -319,12 +349,13 @@ from ios_homescreen import api
 async def main():
     device = await api.connect(api.Transport())  # api.Transport(wifi=True) for Wi-Fi
     try:
-        snapshot = await api.read_device(device)
-        view = api.describe(snapshot)  # JSON-ready layout for a UI
-        plan = api.plan_layout(api.to_document(view), snapshot)
-        result = await api.apply_plan(
+        snapshot = await api.read_device(device)  # what pull reads
+        text = api.export_layout(snapshot)  # the TOML layout file
+        plan = api.plan_layout(text, snapshot)  # what check does; raises api.LayoutError
+        print(plan.changes)
+        result = await api.push(
             device,
-            plan.payload,
+            plan,
             backup_dir=api.data_dir() / "backups",
             on_event=lambda event: print(event.message),
         )
@@ -337,8 +368,11 @@ asyncio.run(main())
 ```
 
 Progress arrives as `Event` objects with a stable `code`; results and errors have `to_dict()`
-and machine-readable codes. `api.fetch_icons` returns app icons as PNG bytes, and
-`api.describe_changes(before, after)` lists what differs between two views.
+and machine-readable codes. `api.describe(snapshot)` gives a JSON-ready view of a layout for a
+UI and `api.to_document(view)` turns an edited view back into a layout; `plan.change_list`
+holds the changes as data. `api.save_pull`, `api.list_backups`, `api.find_backup` and
+`api.restore` work with the data directory like the CLI does, and `api.fetch_icons` returns
+app icons as PNG bytes.
 
 ## Limitations
 
@@ -354,8 +388,8 @@ and machine-readable codes. `api.fetch_icons` returns app icons as PNG bytes, an
 - Wi-Fi needs iOS 17 or later.
 - Empty pages are not written; SpringBoard does not keep them.
 - Page capacity uses the iPhone grid (6 by 4). iPads have not been tested.
-- The layout format is Apple's and undocumented, and an iOS update can change it. Run `read`
-  first after an update; the backup and rollback are there for the case where it changes.
+- The layout format is Apple's and undocumented, and an iOS update can change it. Pull again
+  after an update; the backup and rollback are there for the case where it changes.
 - The write format was verified on an iPhone 15 with iOS 26 and iOS 27.
 
 ## Troubleshooting
@@ -378,13 +412,17 @@ answers. Guest networks and client isolation keep the two apart, and firewalls m
 (UDP 5353).
 
 `this computer has no Wi-Fi pairing yet`, or a pairing made by an older pymobiledevice3: run
-`wifi enable` over USB again.
+`wifi setup` over USB again.
 
 The browser says the page needs the address from the terminal: open the full address that
-`ios-homescreen ui` printed. The key in it changes every time the editor starts.
+`ios-homescreen editor` printed. The key in it changes every time the editor starts.
 
-`the device layout changed since the read`: the phone was edited after your `read`. Run
-`read` again and plan again, or use `--force` if you are sure.
+`the iPhone's layout changed since layout.toml was pulled`: the phone was edited after your
+`pull`. Pull into a new file (`ios-homescreen pull new.toml`), carry your edits over and push
+that, or use `--force` if you want your file to win.
+
+`there is no terminal to ask in`: `push` and `restore` ask before writing. In a script, add
+`--yes` once you have checked the changes with `check`.
 
 Exit code 3 (rolled back): the phone did not show the new layout in time. SpringBoard can be
 slow, especially over Wi-Fi. Try `--verify-attempts 10 --verify-interval 5`.

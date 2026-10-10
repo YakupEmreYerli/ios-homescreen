@@ -1,8 +1,10 @@
-"""Resolve a layout document against a read snapshot into a safe write payload.
+"""Resolve a layout document against a pull snapshot into a safe write payload.
 
 A layout document is the parsed TOML file (or the same structure built from JSON):
-``{"dock": {"items": [...]}, "pages": [{"items": [...]}, ...]}``. Planning is offline:
-it never talks to a device.
+``{"dock": {"items": [...]}, "pages": [{"items": [...]}, ...]}``, plus two optional
+tables the planner only checks the shape of: ``[pull]`` (which snapshot the file was
+pulled from, see :mod:`.storage`) and ``[showcase]`` (``editor --showcase``). Planning
+is offline: it never talks to a device.
 
 Problems are collected rather than raised one by one, each with a stable ``code`` and
 a location, so the CLI can list them all and a UI can point at the item.
@@ -18,7 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .report import diff_text
+from .model import describe, describe_changes, match_folders
+from .report import change_lines, change_summary
 from .snapshots import utc_now
 from .state import (
     DOCK_SLOTS,
@@ -61,7 +64,8 @@ _ITEM_KEYS = {
     "webapp": {"type", "id"},
     "folder": {"type", "name", "items", "pages"},
 }
-_TOP_LEVEL_KEYS = {"dock", "pages"}
+_TOP_LEVEL_KEYS = {"dock", "pages", "pull", "showcase"}
+_TABLE_KEYS = {"pull": {"snapshot": str}, "showcase": {"library": list}}
 
 
 @dataclass(frozen=True)
@@ -145,11 +149,19 @@ def _fail(code: str, message: str, where: Location | None = None, **details: Any
 @dataclass(frozen=True)
 class Plan:
     payload: dict[str, Any]
+    """What gets written: ``{buttonBar, iconLists, ignored}`` plus the source fingerprint."""
     changes: str
+    """The change list as text, for people."""
     to_library: tuple[str, ...]
     to_home_screen: tuple[str, ...]
     removed: tuple[str, ...]
     ignored_count: int
+    change_list: tuple[dict[str, Any], ...] = ()
+    """:func:`ios_homescreen.model.describe_changes` against the pull."""
+
+    @property
+    def unchanged(self) -> bool:
+        return not self.change_list
 
     def summary(self) -> dict[str, Any]:
         """JSON-friendly facts about the plan (the payload itself is binary-plist data)."""
@@ -420,9 +432,32 @@ def _not_removable(ident: str, item: Any) -> LayoutIssue:
         "not_removable",
         f"the layout leaves out the {named}. A {label} cannot be removed by writing a "
         "layout: the iPhone puts it back. Keep it in the layout, or delete it on the "
-        f"iPhone ({_DELETE_ON_PHONE[kind]}) and read again",
+        f"iPhone ({_DELETE_ON_PHONE[kind]}) and pull again",
         details={"id": ident, "kind": kind, "name": str(name or "")},
     )
+
+
+def _check_tables(document: Mapping[str, Any]) -> None:
+    """``[pull]`` and ``[showcase]`` are optional, but a typo in them must not pass."""
+    for name, keys in _TABLE_KEYS.items():
+        if name not in document:
+            continue
+        table = document[name]
+        if not isinstance(table, Mapping):
+            raise _fail("bad_structure", f"{name} must be a table ([{name}])")
+        unknown = sorted(set(table) - set(keys))
+        if unknown:
+            raise _fail(
+                "unknown_key",
+                f"unknown key(s) in [{name}]: {', '.join(unknown)}",
+                keys=unknown,
+            )
+        for key, kind in keys.items():
+            if key in table and not isinstance(table[key], kind):
+                raise _fail("bad_structure", f"[{name}] {key} has the wrong type")
+    library = document.get("showcase", {}).get("library", [])
+    if any(not isinstance(x, str) or not x for x in library):
+        raise _fail("bad_structure", "[showcase] library must list app names or ids")
 
 
 def plan_layout(
@@ -431,7 +466,7 @@ def plan_layout(
     *,
     allow_removal: bool = False,
 ) -> Plan:
-    """Validate a layout and turn it into a plan payload for ``apply``.
+    """Validate a layout and turn it into a plan that :func:`ios_homescreen.api.push` writes.
 
     Raises :class:`LayoutError` listing every problem found.
     """
@@ -440,9 +475,11 @@ def plan_layout(
     if unknown:
         raise _fail(
             "unknown_key",
-            f"unknown top-level key(s): {', '.join(unknown)} (expected dock, pages)",
+            f"unknown top-level key(s): {', '.join(unknown)} (expected dock, pages, pull, "
+            "showcase)",
             keys=unknown,
         )
+    _check_tables(document)
     planner = _Planner(read)
 
     dock_where = Location("dock")
@@ -513,16 +550,9 @@ def plan_layout(
         "source_fingerprint": fingerprint(source_state),
         "created": utc_now(),
     }
-    changes = "\n".join(
-        [
-            "Changes:",
-            diff_text(source_state, draft).rstrip(),
-            f"To the App Library ({len(to_library)}): {', '.join(to_library) or 'none'}",
-            f"To the home screen ({len(to_home)}): {', '.join(to_home) or 'none'}",
-            f"Removed widgets ({len(removed)}): {', '.join(removed) or 'none'}",
-            f"Apps kept off the home screen (ignored): {len(payload['ignored'])}",
-        ]
-    )
+    change_list = tuple(changes_between(read, draft))
+    lines = change_lines(change_list)
+    changes = "\n".join([*lines, change_summary(change_list)]) if lines else "No changes."
     return Plan(
         payload=payload,
         changes=changes,
@@ -530,4 +560,19 @@ def plan_layout(
         to_home_screen=to_home,
         removed=removed,
         ignored_count=len(payload["ignored"]),
+        change_list=change_list,
     )
+
+
+def changes_between(read: Mapping[str, Any], state: Any) -> list[dict[str, Any]]:
+    """What writing ``state`` changes compared with the layout in ``read``.
+
+    The same change list the browser editor shows (see
+    :func:`ios_homescreen.model.describe_changes`); folders are matched by name, or by
+    their contents when they were renamed.
+    """
+    apps = read.get("apps", {}) or {}
+    before = describe(read)
+    after = describe({"state": state, "apps": apps})
+    match_folders(before, after)
+    return describe_changes(before, after)

@@ -28,7 +28,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# The browser UI (`ios-homescreen ui`). pymobiledevice3 already pulls both in; they are
+# The browser editor (`ios-homescreen editor`). pymobiledevice3 already pulls both in; they are
 # listed here so the UI keeps working if it ever stops doing so.
 ui = [
   "starlette>=0.40",

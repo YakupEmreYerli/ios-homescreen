@@ -1,20 +1,23 @@
 """Python API: everything the CLI does, with no printing and no argument parsing.
 
-Typical use::
+The same steps as ``pull``, ``check`` and ``push``::
 
     from ios_homescreen import api
 
-    device = await api.connect(api.Transport())          # USB; Transport(wifi=True) for Wi-Fi
+    device = await api.connect(api.Transport())         # USB; Transport(wifi=True) for Wi-Fi
     try:
-        snapshot = await api.read_device(device)
-        plan = api.plan_layout(layout_toml_or_document, snapshot)
-        result = await api.apply_plan(device, plan.payload, backup_dir=api.data_dir() / "backups",
-                                      on_event=lambda event: print(event.message))
+        snapshot = await api.read_device(device)         # pull: read-only
+        text = api.export_layout(snapshot)               # an editable TOML layout
+        plan = api.plan_layout(text, snapshot)           # check: offline, raises LayoutError
+        print(plan.changes)
+        result = await api.push(device, plan, backup_dir=api.data_dir() / "backups",
+                                on_event=lambda event: print(event.message))
     finally:
         await device.close()
 
 Long operations report progress through ``on_event`` callbacks (:class:`Event`) and
 return dataclasses with ``to_dict()`` for JSON. Errors carry a machine-readable ``code``.
+Pull snapshots and backups are kept as described in :mod:`ios_homescreen.storage`.
 """
 
 from __future__ import annotations
@@ -26,22 +29,20 @@ from typing import Any
 
 from .device import Device, DeviceError, open_device
 from .events import Event, EventSink, ignore
-from .export import export_layout
+from .export import export_layout, pull_note
 from .icons import IconCache, load_icons
 from .model import describe, describe_changes, to_document
 from .paths import cache_dir, data_dir
-from .planner import LayoutError, LayoutIssue, Plan, load_layout, plan_layout
-from .report import read_summary
-from .snapshots import load_read, make_read, state_from_file, timestamp
+from .planner import LayoutError, LayoutIssue, Plan, changes_between, load_layout, plan_layout
+from .snapshots import load_pull, make_read, state_from_file
 from .state import (
     PLAN_META_KEY,
     StateError,
-    load_plist,
-    save_plist,
     to_payload,
     validate_backup,
     validate_plan,
 )
+from .storage import Backup, find_backup, find_pull, list_backups, newest_pull, save_pull
 from .transport import (
     DEFAULT_DISCOVERY_TIMEOUT,
     Backend,
@@ -55,6 +56,7 @@ from .workflow import ApplyResult, Timing, WorkflowError, apply_state
 
 __all__ = [
     "ApplyResult",
+    "Backup",
     "Device",
     "DeviceError",
     "Event",
@@ -63,30 +65,33 @@ __all__ = [
     "LayoutError",
     "LayoutIssue",
     "Plan",
-    "SavedRead",
     "StateError",
     "Timing",
     "Transport",
     "TransportError",
     "WifiStatus",
     "WorkflowError",
-    "apply_plan",
     "cache_dir",
+    "changes_between",
     "connect",
     "data_dir",
     "describe",
     "describe_changes",
     "export_layout",
     "fetch_icons",
+    "find_backup",
+    "find_pull",
+    "list_backups",
     "load_backup",
     "load_layout",
-    "load_plan",
-    "load_read",
+    "load_pull",
+    "newest_pull",
     "plan_layout",
+    "pull_note",
+    "push",
     "read_device",
     "restore",
-    "save_plan",
-    "save_read",
+    "save_pull",
     "set_wifi",
     "to_document",
     "wifi_status",
@@ -107,8 +112,10 @@ async def connect(
 
 
 async def read_device(device: Any) -> dict[str, Any]:
-    """Read-only snapshot: layout, installed User/System apps, raw format 3 state."""
-    info = {k: v for k, v in dict(device.info).items() if k != "wifi_mac"}
+    """Read-only snapshot: layout, installed User/System apps, raw format 3 state.
+
+    :func:`save_pull` keeps it; :func:`export_layout` turns it into a layout file.
+    """
     state = await device.read_state()
     apps = await device.installed_apps()
     raw_v3, raw_v3_error = None, None
@@ -117,67 +124,35 @@ async def read_device(device: Any) -> dict[str, Any]:
     except Exception as exc:
         # The format 3 answer is only kept for reference; its failure is recorded.
         raw_v3_error = str(exc)
-    return make_read(state, apps, device=info, raw_v3=raw_v3, raw_v3_error=raw_v3_error)
-
-
-@dataclass(frozen=True)
-class SavedRead:
-    path: Path
-    summary_path: Path
-
-
-def save_read(snapshot: Mapping[str, Any], directory: Path) -> SavedRead:
-    """Write ``read-TIMESTAMP.plist`` and a text summary next to it."""
-    stamp = timestamp()
-    path = save_plist(Path(directory) / f"read-{stamp}.plist", dict(snapshot))
-    summary = path.with_suffix(".txt")
-    summary.write_text(
-        read_summary(
-            snapshot["state"],
-            snapshot["apps"],
-            device=snapshot.get("device"),
-            raw_v3_error=snapshot.get("raw_state_v3_error"),
-        ),
-        encoding="utf-8",
-    )
-    return SavedRead(path, summary)
-
-
-def save_plan(plan: Plan, path: Path) -> Path:
-    return save_plist(path, plan.payload)
-
-
-def load_plan(path: Path) -> dict[str, Any]:
-    """Load and validate a plan file made by :func:`plan_layout` / :func:`save_plan`."""
-    plan = load_plist(path)
-    validate_plan(plan)
-    return plan
+    return make_read(state, apps, device=device.info, raw_v3=raw_v3, raw_v3_error=raw_v3_error)
 
 
 def load_backup(path: Path) -> dict[str, Any]:
-    """Load a backup, read snapshot or state plist and return it as a restore target."""
+    """Load a backup, pull snapshot or state plist and return it as a restore target."""
     if Path(path).suffix.lower() == ".json":
         raise StateError("restore needs a plist; JSON dumps lose dates and binary data")
     state = state_from_file(path)
     if isinstance(state, dict) and PLAN_META_KEY in state:
-        raise StateError(f"{path} is a plan; use apply for plans")
+        raise StateError(f"{path} is a plan, not a backup")
     validate_backup(state)
     return to_payload(state)
 
 
-async def apply_plan(
+async def push(
     device: Any,
-    plan: Mapping[str, Any],
+    plan: Plan | Mapping[str, Any],
     *,
     backup_dir: Path,
     force: bool = False,
     timing: Timing | None = None,
     on_event: EventSink = ignore,
 ) -> ApplyResult:
-    """Back up, refuse on drift (unless ``force``), write, verify, roll back on failure."""
-    validate_plan(plan)
+    """Write a plan: back up, refuse if the phone changed since the pull (unless
+    ``force``), write, verify by re-reading, roll back on failure."""
+    payload = plan.payload if isinstance(plan, Plan) else plan
+    validate_plan(payload)
     return await apply_state(
-        device, plan, backup_dir=backup_dir, force=force, timing=timing, on_event=on_event
+        device, payload, backup_dir=backup_dir, force=force, timing=timing, on_event=on_event
     )
 
 
@@ -189,7 +164,7 @@ async def restore(
     timing: Timing | None = None,
     on_event: EventSink = ignore,
 ) -> ApplyResult:
-    """Write a backup (list or dictionary form, see :func:`load_backup`) like apply does."""
+    """Write a backup (list or dictionary form, see :func:`load_backup`) like push does."""
     validate_backup(target)
     # A backup has no source fingerprint: restoring is meant to overwrite.
     return await apply_state(

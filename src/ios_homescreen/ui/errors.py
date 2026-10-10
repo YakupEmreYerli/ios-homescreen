@@ -36,8 +36,8 @@ _WIFI_STEPS = [
 ]
 
 _WIFI_SETUP = [
-    "Connect the iPhone with a cable once and run `ios-homescreen wifi enable`.",
-    "Then restart the UI with `--wifi`.",
+    "Connect the iPhone with a cable once and run `ios-homescreen wifi setup`.",
+    "Then restart the editor with `--wifi`.",
 ]
 
 # code -> (title, steps)
@@ -75,11 +75,11 @@ _KNOWN: dict[str, tuple[str, list[str]]] = {
     "not_advertising": ("The iPhone did not answer on the network", _WIFI_STEPS),
     "several_devices": (
         "More than one iPhone answered",
-        ["Restart the UI with `--udid UDID` to pick one."],
+        ["Restart the editor with `--udid UDID` to pick one."],
     ),
     "several_pair_records": (
         "More than one paired iPhone",
-        ["Restart the UI with `--udid UDID` to pick one."],
+        ["Restart the editor with `--udid UDID` to pick one."],
     ),
     "timeout": (
         "The iPhone did not answer in time",

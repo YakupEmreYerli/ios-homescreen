@@ -84,7 +84,7 @@ def test_wifi_opens_the_tunnel_for_the_paired_phone():
 def test_wifi_without_a_pairing_explains_the_one_time_setup():
     backend = FakeWifiBackend([])
 
-    with pytest.raises(TransportError, match="wifi enable") as error:
+    with pytest.raises(TransportError, match="wifi setup") as error:
         run(connect(Transport(wifi=True), backend=backend))
 
     assert error.value.code == "no_pair_record"
@@ -103,7 +103,7 @@ def test_wifi_with_several_pairings_needs_a_udid():
 
 
 def test_old_pairings_without_the_alternate_irk_must_be_made_again():
-    with pytest.raises(TransportError, match="wifi enable") as error:
+    with pytest.raises(TransportError, match="wifi setup") as error:
         pick_record([record(usable=False)], None)
 
     assert error.value.code == "stale_pair_record"

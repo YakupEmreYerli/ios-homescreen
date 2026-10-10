@@ -1,11 +1,13 @@
-"""Turn a read snapshot into an editable TOML layout file."""
+"""Turn a pull snapshot into an editable TOML layout file."""
 
 from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any
 
+from .report import library_apps
 from .state import (
     PAGE_CELLS,
     StateError,
@@ -18,13 +20,15 @@ from .state import (
 )
 
 HEADER = """\
-# ios-homescreen layout
+# ios-homescreen layout. Edit it, then run `ios-homescreen check` to see what would
+# change and `ios-homescreen push` to write it to the iPhone.
 #
 # Items are in home screen order: left to right, top to bottom.
-# Apps: "bundle.id" or the app's name. Apps you leave out move to the App Library.
-# Widgets, web clips and Safari web apps are referenced by the id they had in the
-# read. They can be moved, not created; widgets can also be removed (plan
-# --allow-removal), web clips and web apps only on the phone.
+# Apps: "bundle.id" or the app's name. Apps you leave out go to the App Library; the
+# end of this file lists the apps that are only there now.
+# Widgets, web clips and Safari web apps keep the id they have on the phone. They can
+# be moved, not created. Widgets can also be removed (check and push --allow-removal);
+# web clips and web apps only on the phone.
 # Folders: { type = "folder", name = "...", items = [...] }, or pages = [[...], [...]]
 # for a folder with several pages. Folders hold apps, web clips and web apps.
 # Limits: dock 4 items. A page has 24 cells: an app, folder, web clip or web app
@@ -137,13 +141,62 @@ def _items_block(items: list[Any], names: _Names) -> list[str]:
     return lines
 
 
-def export_layout(read: Mapping[str, Any], *, source: str | None = None) -> str:
-    """A complete layout file that plans back to the exact same layout."""
+def pull_source(read: Mapping[str, Any]) -> str:
+    """``Ada's iPhone (iPhone 15, iOS 26.0) on 2026-10-10 14:44``: where and when."""
+    device = read.get("device") or {}
+    version = f"iOS {device['ios_version']}" if device.get("ios_version") else None
+    details = ", ".join(str(x) for x in (device.get("model"), version) if x)
+    name = str(device.get("name") or "the iPhone")
+    text = f"{name} ({details})" if details else name
+    created = read.get("created")
+    if isinstance(created, datetime):
+        local = created.replace(tzinfo=UTC).astimezone() if created.tzinfo is None else created
+        text += f" on {local:%Y-%m-%d %H:%M}"
+    return text
+
+
+def pull_note(read: Mapping[str, Any]) -> str:
+    """``Pulled from Ada's iPhone (iPhone 15, iOS 26.0) on 2026-10-10 14:44.``"""
+    return f"Pulled from {pull_source(read)}."
+
+
+def _library_block(read: Mapping[str, Any], names: _Names) -> list[str]:
+    apps = read.get("apps", {}) or {}
+    only = sorted(
+        library_apps(read["state"], apps), key=lambda i: (names.of_bundle(i).casefold(), i)
+    )
+    if not only:
+        return []
+    lines = [
+        "",
+        f"# Only in the App Library ({len(only)}). To put one on the home screen, copy it",
+        "# into a page above:",
+    ]
+    lines.extend(f"#   {_quote(ident)},  # {_comment(names.of_bundle(ident))}" for ident in only)
+    return lines
+
+
+def export_layout(
+    read: Mapping[str, Any], *, pull: str | None = None, note: str | None = None
+) -> str:
+    """A complete layout file that plans back to the exact same layout.
+
+    ``pull`` names the snapshot in a ``[pull]`` table so check and push can find it;
+    ``note`` is a comment under the header, such as :func:`pull_note`.
+    """
     dock, pages = split_state(read["state"])
     names = _Names(read.get("apps", {}) or {})
     lines = [HEADER.rstrip("\n")]
-    if source:
-        lines.append(f"#\n# Exported from {_comment(source)}")
+    if note:
+        lines.append(f"#\n# {_comment(note)}")
+    if pull:
+        lines += [
+            "",
+            "# check and push compare this file with the phone layout it was pulled from.",
+            "# Leave this table as it is.",
+            "[pull]",
+            f"snapshot = {_quote(pull)}",
+        ]
     lines += ["", "[dock]", *_items_block(dock, names)]
     for page_no, page in enumerate(pages, 1):
         lines += [
@@ -152,4 +205,5 @@ def export_layout(read: Mapping[str, Any], *, source: str | None = None) -> str:
             "[[pages]]",
             *_items_block(page, names),
         ]
+    lines += _library_block(read, names)
     return "\n".join(lines) + "\n"

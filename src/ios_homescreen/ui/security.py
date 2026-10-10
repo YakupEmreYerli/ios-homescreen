@@ -178,7 +178,7 @@ class Guard:
     async def _locked(self, send: Send) -> None:
         page = _LOCKED_PAGE.format(
             title="Open the link from the terminal",
-            text="This page needs the address that <code>ios-homescreen ui</code> printed "
+            text="This page needs the address that <code>ios-homescreen editor</code> printed "
             "when it started. It contains a one-time key that changes on every start.",
         )
         await self._respond(send, 403, page.encode(), "text/html; charset=utf-8")

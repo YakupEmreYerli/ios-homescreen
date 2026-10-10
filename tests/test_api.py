@@ -46,16 +46,19 @@ def test_a_whole_session_through_the_api(tmp_path):
     events = []
 
     snapshot = run(api.read_device(device))
-    saved = api.save_read(snapshot, tmp_path / "reads")
-    read = api.load_read(saved.path)
+    saved = api.save_pull(snapshot, tmp_path)
+    read = api.load_pull(api.newest_pull(tmp_path))
+    text = api.export_layout(read, pull=saved.name, note=api.pull_note(read))
+    path, named = api.find_pull(api.load_layout(text), tmp_path)
+    assert (path, named) == (saved, True)
     view = api.describe(read)
     view["dock"].reverse()
     plan = api.plan_layout(api.to_document(view), read)
-    plan_path = api.save_plan(plan, tmp_path / "plan.plist")
+    assert [c["kind"] for c in plan.change_list] == ["reordered"] * 3
     result = run(
-        api.apply_plan(
+        api.push(
             device,
-            api.load_plan(plan_path),
+            plan,
             backup_dir=tmp_path / "backups",
             timing=api.Timing(verify_attempts=1, verify_interval=0),
             on_event=events.append,
@@ -66,8 +69,12 @@ def test_a_whole_session_through_the_api(tmp_path):
     assert json.loads(json.dumps(result.to_dict()))["status"] == "applied"
     assert json.dumps(plan.summary())
     assert run(device.read_state())[0][0]["bundleIdentifier"] == "com.apple.camera"
-    assert saved.summary_path.read_text().startswith("Home screen summary")
     assert events[-1].code == "verified"
+    (backup,) = api.list_backups(tmp_path / "backups")
+    assert backup.path == result.backup
+    assert backup.device["name"] == "Test iPhone"
+    assert backup.counts == {"dock": 4, "pages": 2, "items": 33}
+    assert api.find_backup(tmp_path / "backups", "latest") == result.backup
 
     restored = run(
         api.restore(
@@ -81,11 +88,11 @@ def test_a_whole_session_through_the_api(tmp_path):
     assert run(device.read_state()) == samples.home_screen()
 
 
-def test_apply_plan_validates_before_touching_the_device(tmp_path):
+def test_push_validates_before_touching_the_device(tmp_path):
     device = FakeSpringBoard(samples.home_screen(), samples.installed_apps())
 
     with pytest.raises(api.StateError):
-        run(api.apply_plan(device, {"buttonBar": []}, backup_dir=tmp_path))
+        run(api.push(device, {"buttonBar": []}, backup_dir=tmp_path))
 
     assert device.reads == 0
 
@@ -126,7 +133,7 @@ def test_wifi_status_without_pairing_or_network(tmp_path):
 
     assert status.enabled is True
     assert status.pair_record is None
-    assert "wifi enable" in status.pair_record_problem
+    assert "wifi setup" in status.pair_record_problem
     assert status.reachable is None
     assert ("reachable", "00008120-000A1B2C3D4E5F60") not in backend.calls
 

@@ -14,6 +14,6 @@
 <!--
 If you changed anything that talks to the phone (device.py, transport.py, workflow.py,
 the write payload), say what you ran on a real device: model, iOS version, USB or Wi-Fi,
-and whether you started with `read` and kept the backup. "Not tested on a device" is a
+and whether you started with `pull` and kept the backup. "Not tested on a device" is a
 fine answer; just say so.
 -->

@@ -1,7 +1,7 @@
 <h1 align="center">ios-homescreen</h1>
 
 <p align="center">
-iPhone ana ekranını Linux'tan okuyun, yeni düzeni bir metin dosyasında planlayın ve telefona güvenle yazın. USB ya da Wi-Fi ile.
+iPhone ana ekranını Linux'ta bir metin dosyasına çekin, düzenleyin ve telefona güvenle geri yazın. USB ya da Wi-Fi ile.
 </p>
 
 <p align="center">
@@ -15,35 +15,37 @@ iPhone ana ekranını Linux'tan okuyun, yeni düzeni bir metin dosyasında planl
 ![ios-homescreen](docs/assets/banner.tr.png)
 
 Onlarca simgeyi telefonda tek tek sürükleyerek yerleştirmek uzun sürüyor. ios-homescreen
-mevcut düzeni bilgisayara kaydeder, istediğiniz metin düzenleyicide değiştirebileceğiniz bir
-TOML dosyasına çevirir, yaptığınız değişiklikleri telefona dokunmadan denetler ve sonucu
-telefona yazar. Her yazmadan önce yedek alır, telefonu yeniden okuyarak sonucu doğrular;
-telefon istediğiniz düzene gelmediyse yedeği kendiliğinden geri yazar.
+mevcut düzeni istediğiniz metin düzenleyicide değiştirebileceğiniz bir TOML dosyasına çeker,
+değişikliklerinizin telefonda neyi değiştireceğini gösterir ve sonucu telefona yazar. Her
+yazmadan önce size sorar, yedek alır, telefonu yeniden okuyarak sonucu doğrular; telefon
+istediğiniz düzene gelmediyse yedeği kendiliğinden geri yazar.
 
-Simgeleri sürükleyerek çalışmayı seviyorsanız `ios-homescreen ui` aynı işi tarayıcıda açılan
-bir düzenleyiciyle yapar.
+Simgeleri sürükleyerek çalışmayı seviyorsanız `ios-homescreen editor` aynı işi tarayıcıda
+yapar.
 
 ## Özellikler
 
 - Dock'u, sayfaları, klasörleri (çok sayfalı klasörler dahil), widget'ları, widget
   yığınlarını, web kısayollarını, Safari web uygulamalarını ve boşaltılmış uygulamaları
-  düzenlenebilir bir TOML dosyasına aktarır.
+  düzenlenebilir bir TOML dosyasına çeker. Yalnız Uygulama Arşivi'nde duran uygulamaları da
+  dosyanın sonunda listeler.
 - Uygulamalara paket kimliğiyle ya da simgenin altındaki adla başvurabilirsiniz.
 - Düzeni telefona gitmeden denetler: bilinmeyen ya da iki kez kullanılan öğe, dolu dock,
   24 hücreyi aşan sayfa (widget'lar boyutlarına göre sayılır), boş ya da iç içe klasör,
   klasördeki widget.
 - Düzene yazmadığınız uygulamalar Uygulama Arşivi'ne gider ve orada kalır.
 - Yazmadan önce neyin taşınacağını, neyin arşive gideceğini ve neyin ana ekrana döneceğini gösterir.
-- Yalnız açıkça `--yes` verildiğinde, yedekten sonra yazar ve sonucu telefonu yeniden okuyarak
-  denetler. Tutmazsa yedeği geri yazar.
+- Telefon `pull` komutundan sonra değiştiyse yazmaz. Yazmadan önce sorar, yedek alır ve
+  sonucu telefonu yeniden okuyarak denetler. Tutmazsa yedeği geri yazar. Bir `push`
+  komutunu `ios-homescreen restore latest` geri alır.
 - USB ile çalışır; USB üzerinden bir kez kurduktan sonra Wi-Fi ile de (iOS 17 ve sonrası).
   İkisi için de root ya da Geliştirici Modu gerekmez.
-- Okumaları, yedekleri ve planları çalışma klasörüne değil `~/.local/share/ios-homescreen`
-  altına kaydeder.
-- Tarayıcıda çalışan bir düzenleyicisi var (`ios-homescreen ui`): uygulamaları, klasörleri ve
-  widget'ları ana ekranın resmi üzerinde sürüklersiniz, her değişikliği telefona yazılmadan önce
-  görürsünüz, aynı güvenlik adımlarıyla uygularsınız. Telefon olmadan denemek için bir demo
-  modu da var.
+- Telefonun kayıtlarını ve yedekleri `~/.local/share/ios-homescreen` altında tutar; çalışma
+  klasörüne yalnız düzen dosyası yazılır.
+- Tarayıcıda çalışan bir düzenleyicisi var (`ios-homescreen editor`): uygulamaları, klasörleri
+  ve widget'ları ana ekranın resmi üzerinde sürüklersiniz, her değişikliği telefona yazılmadan
+  önce görürsünüz, aynı güvenlik adımlarıyla uygularsınız. Telefon olmadan denemek için bir
+  demo modu da var.
 - Python'dan da kullanılabilir: komut satırı, `ios_homescreen.api` üzerine ince bir katman.
 
 ## Gereksinimler
@@ -88,67 +90,69 @@ uv run ios-homescreen --help
 ## Hızlı başlangıç
 
 ```bash
-# 1. Mevcut düzeni kaydet. Yalnız okur, telefona hiçbir şey yazmaz.
-ios-homescreen read
+# 1. Telefonu layout.toml dosyasına çek. Yalnız okur, telefona hiçbir şey yazmaz.
+ios-homescreen pull
 
-# 2. Son okumayı düzen dosyasına çevir ve düzenle.
-ios-homescreen export -o layout.toml
+# 2. Dosyayı düzenle: satırları taşı, sondaki listeden uygulama ekle, klasör kur.
 $EDITOR layout.toml
 
-# 3. Düzeni denetle, neyin değişeceğini gör. Telefona bağlanmaz.
-ios-homescreen plan layout.toml -o plan.plist
+# 3. Neyin değişeceğine bak. Telefona bağlanmaz.
+ios-homescreen check
 
-# 4. Yaz. Yedek, yazma, doğrulama, gerekirse geri dönüş.
-ios-homescreen apply plan.plist --yes
+# 4. Yaz. push değişiklikleri gösterip sorar; sonra yedek, yazma, doğrulama, gerekirse geri dönüş.
+ios-homescreen push
 ```
 
-Geri almak için `apply` komutunun yazdığı yedeği geri yükleyin:
+Bir `push` komutunu geri almak için aldığı yedeği geri yazın:
 
 ```bash
-ios-homescreen restore ~/.local/share/ios-homescreen/backups/backup-20261010-101500-000000.plist --yes
+ios-homescreen restore latest
 ```
 
 ## Komutlar
 
 | Komut | Ne yapar | Telefona bağlanır mı |
 | --- | --- | --- |
-| `read` | Düzeni ve kurulu uygulamaları bir okuma dosyasına, yanına da metin özetine kaydeder | Yalnız okur |
-| `export [READ]` | Bir okumanın düzenini (varsayılan: en yenisi) TOML olarak ekrana basar, `-o FILE` ile dosyaya yazar | Hayır |
-| `plan LAYOUT` | Düzeni bir okumaya göre denetler (`--read`, varsayılan: en yenisi), değişiklikleri gösterir, planı kaydeder | Hayır |
-| `apply PLAN --yes` | Yedek alır, planı yazar, doğrular, tutmazsa geri döner | Yazar |
-| `restore BACKUP --yes` | Bir yedeği ya da okumayı aynı güvenlik adımlarıyla geri yazar | Yazar |
-| `diff BEFORE AFTER` | Kayıtlı iki düzeni karşılaştırır (okuma, yedek, plan ya da plist/JSON döküm) | Hayır |
-| `wifi status\|enable\|disable` | Telefona Wi-Fi erişimini kurar, denetler ya da kapatır | Evet |
-| `ui` | Tarayıcı düzenleyicisini 127.0.0.1 üzerinde açar | Okur; yalnız Uygula'ya basınca yazar |
+| `pull [LAYOUT]` | Ana ekranı bir düzen dosyasına (varsayılan `layout.toml`) yazar, telefonun o anki hâlini de kayıt olarak saklar | Yalnız okur |
+| `check [LAYOUT]` | Dosyayı denetler, `push` komutunun pull kaydına göre neyi değiştireceğini listeler | Hayır |
+| `push [LAYOUT]` | Değişiklikleri gösterip sorar; sonra yedek alır, yazar, doğrular, tutmazsa geri döner | Yazar |
+| `editor` | Tarayıcı düzenleyicisini 127.0.0.1 üzerinde açar | Okur; yalnız Uygula'ya basınca yazar |
+| `backups` | Her yazmadan önce alınan yedekleri listeler: ne zaman, hangi iPhone, düzende ne vardı | Hayır |
+| `restore BACKUP` | Bir yedeği (`latest`, `backups` listesindeki bir ad ya da bir dosya) `push` ile aynı adımlarla geri yazar | Yazar |
+| `wifi setup\|status\|off` | Telefona Wi-Fi erişimini kurar, denetler ya da kapatır | Evet |
 
-`export` ve `plan` için `-o/--output FILE`; `plan` için ayrıca `--allow-removal` (düzen dosyası
-bölümüne bakın). `read` için `-o/--output DIR`. `apply` için `--force` (güvenlik bölümüne bakın).
-`diff` ve `wifi` dışındaki bütün komutlar `--data-dir DIR` alır.
+`pull`, henüz telefona yazmadığınız değişiklikler taşıyan bir düzen dosyasının üstüne yazmaz;
+başka bir dosyaya çekin ya da `--overwrite` verin. `check` ve `push` komutları
+`--allow-removal` alır (düzen dosyası bölümüne bakın); `push` ve `restore` komutları
+`--force` alır (güvenlik bölümüne bakın). `backups` en yeni 20 yedeği gösterir, `--all`
+hepsini listeler. `wifi` dışındaki bütün komutlar `--data-dir DIR` alır; `push`,
+`restore`, `editor` ve `backups` ayrıca `--backup-dir DIR` alır.
 
-Bağlantı seçenekleri (`read`, `apply`, `restore`, `wifi`, `ui`):
+Bağlantı seçenekleri (`pull`, `push`, `restore`, `editor`, `wifi`):
 
 | Seçenek | Anlamı |
 | --- | --- |
 | *(yok)* | usbmuxd üzerinden USB |
-| `--wifi` | Wi-Fi (iOS 17 ve sonrası); önce bir kez USB üzerinden `wifi enable` çalıştırın |
+| `--wifi` | Wi-Fi (iOS 17 ve sonrası); önce bir kez USB üzerinden `wifi setup` çalıştırın |
 | `--udid UDID` | Birden çok cihaz bağlı ya da eşliyse birini seçer |
 | `--discovery-timeout SECONDS` | Bonjour cevaplarının bekleneceği süre (varsayılan 5) |
 | `--connect-timeout SECONDS` | Bağlantı kurma süre sınırı (varsayılan 30) |
 
-Yazma seçenekleri (`apply`, `restore`; `--yes` dışındakiler `ui` için de geçerli):
+Yazma seçenekleri (`push`, `restore`; `--yes` dışındakiler `editor` için de geçerli):
 
 | Seçenek | Anlamı |
 | --- | --- |
-| `--yes` | Zorunlu. Verilmezse telefona hiç bağlanılmaz |
+| `-y`, `--yes` | Sormadan yazar. Soracak bir terminal yoksa (betik, boru hattı) gerekir |
 | `--backup-dir DIR` | Otomatik yedeğin yeri (varsayılan `DATA_DIR/backups`) |
 | `--verify-attempts N` | Yazmayı doğrulamak için yeniden okuma sayısı (varsayılan 6) |
 | `--verify-interval SECONDS` | Bu okumalar arasındaki bekleme (varsayılan 3) |
 | `--write-timeout SECONDS` | Düzeni gönderme süre sınırı (varsayılan 10) |
 | `--read-timeout SECONDS` | Her okumanın süre sınırı (varsayılan 30) |
 
-Çıkış kodları: `0` tamam; `1` hata (`apply` ve `restore` yazmadan önce durur); `2` kullanım
-hatası ya da `--yes` eksik; `3` yeni düzen doğrulanamadı ve yedek geri yüklendi; `4` geri
-yükleme de doğrulanamadı. Yedek dosyası her durumda kalır.
+Çıkış kodları: `0` tamam (ya da yapılacak bir şey yok); `1` hata, hiçbir şey yazılmadı
+(telefonun pull komutundan sonra değişmesi de buna girer); `2` kullanım hatası ya da yazma
+onaylanmadı (hayır dediniz, ya da terminal yoktu ve `--yes` verilmedi); `3` yeni düzen
+doğrulanamadı ve yedek geri yazıldı; `4` o da doğrulanamadı. Yedek dosyası her durumda kalır.
 
 ## Düzen dosyası
 
@@ -178,8 +182,15 @@ Uygulama adları telefonun diline göre değişir; Türkçe telefonda `"Takvim"`
 gibi adlar yazılır. Paket kimliği her dilde aynıdır.
 
 [`examples/layout.toml`](examples/layout.toml) Apple'ın hazır uygulamalarıyla yazılmış tam bir
-örnek. Siz kendi dosyanıza `export` ile başlayın: gerçek kimlikleri doldurur ve her öğenin adını
-yorum olarak ekler.
+örnek. Siz kendi dosyanıza `pull` ile başlayın: gerçek kimlikleri doldurur, her öğenin adını
+yorum olarak ekler ve yalnız Uygulama Arşivi'nde duran uygulamaları dosyanın sonuna, bir
+sayfaya kopyalanmaya hazır biçimde yazar.
+
+Çekilen dosyanın başındaki `[pull]` tablosu, dosyanın hangi kayıttan geldiğini söyler
+(`DATA_DIR/pulls` içindeki `snapshot = "pull-....plist"`). `check` ve `push` dosyayı bu
+kayıtla karşılaştırır; tabloya dokunmayın. Tablosu olmayan bir dosya en yeni kayıtla
+karşılaştırılır. Başarılı bir `push` telefonun yeni hâlini kaydeder ve tabloyu ona çevirir;
+böylece dosya ile telefon yeniden aynı düzeni anlatır.
 
 | Öğe | Nasıl yazılır | Not |
 | --- | --- | --- |
@@ -196,48 +207,62 @@ Planlayıcının uyguladığı kurallar:
 - Her öğe bir kez geçer. Aynı uygulamanın iki widget'ı, kimlikleri farklı iki ayrı öğedir.
 - Klasörün adı ve en az bir öğesi olmalı; içinde klasör ya da widget olamaz.
 - Widget, web kısayolu ve web uygulaması taşınabilir ama düzen dosyasıyla yeni oluşturulamaz.
-  Okumadaki kimlikleriyle anılırlar ve planlayıcı telefonun kendi verisini olduğu gibi kopyalar.
-  Bir widget'ı düzene yazmazsanız `plan --allow-removal` vermedikçe hata alırsınız.
+  Telefondaki kimlikleriyle anılırlar ve planlayıcı telefonun kendi verisini olduğu gibi
+  kopyalar. Bir widget'ı düzene yazmazsanız `check` ve `push` komutlarına `--allow-removal`
+  vermedikçe hata alırsınız.
 - Web kısayolları ve Safari web uygulamaları yazarak hiç kaldırılamaz. Yazılan düzende biri
   eksikse telefon onu yeni bir son sayfaya geri koyuyor; yazmadan sonraki denetim tutmuyor ve
   yedek geri yükleniyor. Bu yüzden planlayıcı böyle bir düzeni `--allow-removal` verilse de
   reddeder (kod `not_removable`). Bunları telefonda silin (simgeye basılı tutun, Yer İşaretini
-  Sil), sonra yeniden `read` çalıştırın.
+  Sil), sonra yeniden `pull` çalıştırın.
 - Düzende olmayan her kurulu uygulama Uygulama Arşivi'ne gider.
 - Bilinmeyen anahtar hata sayılır; `itmes` gibi bir yazım hatası bir sayfayı sessizce boşaltmaz.
 
-`plan` bulduğu her sorunu yeriyle birlikte yazar, örneğin
-`page 2, item 5: unknown app 'Mpas'`.
+`check` (ve bağlanmadan önce `push`) bulduğu her sorunu yeriyle birlikte yazar, örneğin
+`page 2, item 5: unknown app 'Mpas'`. Neyin değişeceğini de düz bir dille listeler:
+
+```text
+layout.toml is valid.
+Changes compared with the pull from iPhone (iPhone 15, iOS 27.0) on 2026-10-10 14:44:
+
+  Camera          moves from the dock to page 2, position 1
+  Tips            comes from the App Library to page 2, position 2
+  Folder "Tools"  was "Utilities"
+
+1 moved, 1 added and 1 renamed.
+30 apps will be only in the App Library.
+```
 
 ## Tarayıcı düzenleyicisi
 
 ![Demo modunda tarayıcı düzenleyicisi](docs/assets/ui.png)
 
-`ios-homescreen ui` telefonu okur ve tarayıcıda bir düzenleyici açar. Uygulamaları, klasörleri
-ve widget'ları ana ekranın resmi üzerinde, sayfalar arasında ve dock'a sürükleyebilirsiniz. Bir
-uygulamayı ötekinin üstüne bırakınca klasör olur; klasöre tıklayınca açılır, adını orada
-değiştirir, içine uygulama atar ya da çıkarırsınız. Soldaki Uygulama Arşivi, kurulu olup ana
-ekranda olmayan uygulamaları gösterir: oradan ana ekrana sürükleyin ya da ana ekrandan kaldırmak
-istediklerinizi oraya bırakın. Sağ tarafta son okumaya göre değişen her şey listelenir; düzen
-siz çalışırken `plan` ile aynı kurallarla denetlenir.
+`ios-homescreen editor` telefonu okur ve tarayıcıda bir düzenleyici açar. Uygulamaları,
+klasörleri ve widget'ları ana ekranın resmi üzerinde, sayfalar arasında ve dock'a
+sürükleyebilirsiniz. Bir uygulamayı ötekinin üstüne bırakınca klasör olur; klasöre tıklayınca
+açılır, adını orada değiştirir, içine uygulama atar ya da çıkarırsınız. Soldaki Uygulama
+Arşivi, kurulu olup ana ekranda olmayan uygulamaları gösterir: oradan ana ekrana sürükleyin ya
+da ana ekrandan kaldırmak istediklerinizi oraya bırakın. Sağ tarafta son okumaya göre değişen
+her şey listelenir; düzen siz çalışırken `check` ile aynı kurallarla denetlenir.
 
-Uygula önce onay ister, sonra `apply` ile aynı adımlardan geçer: yedek, yazma, geri okuma,
+Uygula önce onay ister, sonra `push` ile aynı adımlardan geçer: yedek, yazma, geri okuma,
 tutmazsa geri dönüş. İlerleme ve sonuç sayfada görünür. Yedekler, otomatik alınan yedekleri
 listeler ve birini aynı yolla geri yükler. İçe ve Dışa Aktar TOML düzen dosyasını yükler ve
-kaydeder; düzenleyiciyle metin düzenleyicisi arasında gidip gelebilirsiniz.
+kaydeder; düzenleyiciyle metin düzenleyicisi arasında gidip gelebilirsiniz. Dışa aktarılan
+dosya `check` ve `push` ile de çalışır.
 
 ```bash
-ios-homescreen ui              # USB ile; Wi-Fi için --wifi ekleyin
-ios-homescreen ui --demo       # uydurma uygulamalı bir deneme iPhone'u
+ios-homescreen editor          # USB ile; Wi-Fi için --wifi ekleyin
+ios-homescreen editor --demo   # uydurma uygulamalı bir deneme iPhone'u
 ```
 
 | Seçenek | Anlamı |
 | --- | --- |
 | `--port PORT` | 127.0.0.1 üzerindeki port (varsayılan: boş herhangi bir port) |
 | `--no-browser` | Yalnız adresi yazar, tarayıcı açmaz |
-| `--demo` | Deneme iPhone'u kullanır; hiçbir telefona bağlanmaz, okumalar, yedekler ve planlar geçici bir klasöre gider |
+| `--demo` | Deneme iPhone'u kullanır; hiçbir telefona bağlanmaz, kayıtlar ve yedekler geçici bir klasöre gider |
 
-Bağlantı ve yazma seçenekleri `apply` komutundaki gibi çalışır. `--yes` gerekmez, düzenleyici
+Bağlantı ve yazma seçenekleri `push` komutundaki gibi çalışır. `--yes` gerekmez, düzenleyici
 kendisi sorar.
 
 Düzenleyici yalnız 127.0.0.1'i dinler. Yazdığı adreste her açılışta değişen bir anahtar var;
@@ -260,38 +285,42 @@ bozdu; tasarım bu ikisinin etrafından dolaşıyor.
 2. Yazmanın güvenilir bir cevabı yok. SpringBoard `setIconState` isteğine çoğu zaman cevap
    vermiyor, pymobiledevice3'ün `set_icon_state` fonksiyonu da bu cevabı sonsuza kadar bekliyor.
    ios-homescreen isteği kendisi, süre sınırıyla gönderir ve cevap gelmemesini "belirsiz" sayar.
-   Kanıt, telefonun yeniden okunan düzeninin planla aynı çıkmasıdır.
+   Kanıt, telefonun yeniden okunan düzeninin gönderilenle aynı çıkmasıdır.
 
-Her `apply` ve `restore` aynı adımlardan geçer:
+Her `push` ve `restore` aynı adımlardan geçer:
 
-1. Mevcut düzeni okur ve zaman damgalı yedek olarak kaydeder.
-2. Düzen, planın yapıldığı okumadan farklıysa (telefon arada değiştiyse) durur. `--force` bu
-   denetimi atlar. `restore` komutunda bu denetim yok.
-3. Düzeni süre sınırıyla gönderir.
-4. Düzeni yeni bir bağlantıyla en çok `--verify-attempts` kez yeniden okur ve planla
+1. Dosyayı bağlanmadan önce denetler. Sorunlu bir düzen telefona hiç gitmez.
+2. Bağlanır ve düzeni okur. Düzen, dosyanın çekildiği kayıttan farklıysa (telefon arada
+   değiştiyse) `push` durur; `--force` yine de yazar. Yedek başka bir iPhone'da alınmışsa
+   `restore` durur; `--force` yine de geri yazar.
+3. Neyin değişeceğini gösterir ve sorar. Yalnız `y` ya da `yes` devam ettirir. Soracak bir
+   terminal yoksa `--yes` gerekir; verilmezse komut bağlanmadan 2 koduyla çıkar.
+4. Düzeni yeniden okur ve iPhone'un adı ve UDID'siyle birlikte zaman damgalı yedek olarak
+   kaydeder. Telefonun değişip değişmediği bu okumada bir kez daha denetlenir.
+5. Düzeni süre sınırıyla gönderir.
+6. Düzeni yeni bir bağlantıyla en çok `--verify-attempts` kez yeniden okur ve gönderilenle
    karşılaştırır: her sayfada ve her klasörde öğe türleri, kimlikleri ve sırası.
-5. Hiç tutmazsa yedeği aynı yolla geri yazar ve onu da doğrular.
+7. Hiç tutmazsa yedeği aynı yolla geri yazar ve onu da doğrular.
 
-`--yes` olmadan `apply` ve `restore` yalnız dosyayı denetleyip 2 koduyla çıkar, telefona
-bağlanmaz. Okumalar, yedekler ve planlar ikili plist olarak saklanır, çünkü düzende JSON'un
-kaybedeceği tarih ve ikili veri var.
+Kayıtlar ve yedekler ikili plist olarak saklanır, çünkü düzende JSON'un kaybedeceği tarih ve
+ikili veri var.
 
 ## Wi-Fi
 
 Wi-Fi için iOS 17 ya da sonrası gerekir. Telefon USB ile bağlıyken bir kez kurun:
 
 ```bash
-ios-homescreen wifi enable     # USB üzerinden, bir kez
+ios-homescreen wifi setup      # USB üzerinden, bir kez
 ios-homescreen wifi status     # ayar, eşleşme ve telefonun Wi-Fi'de cevap verip vermediği
 ```
 
-`wifi enable` telefondaki Wi-Fi bağlantısı ayarını açar ve bu bilgisayarı Wi-Fi için
+`wifi setup` telefondaki Wi-Fi bağlantısı ayarını açar ve bu bilgisayarı Wi-Fi için
 RemotePairing ile eşler; Xcode kablosuz cihazlar için aynı yolu kullanır. Bilgisayar USB
 üzerinden zaten güvenilir olduğu için telefonda bir soru çıkmaz. Root, Geliştirici Modu ya da
 ayrı bir tünel servisi gerekmez: bağlantı, pymobiledevice3'ün ios-homescreen sürecinin içinde
 çalışan ağ yığınından geçer.
 
-Bundan sonra `read`, `apply`, `restore` ya da `ui` komutuna `--wifi` ekleyin. Telefon
+Bundan sonra `pull`, `push`, `restore` ya da `editor` komutuna `--wifi` ekleyin. Telefon
 bilgisayarla aynı ağda, uyanık ve kilidi açık olmalı. ios-homescreen telefonu
 `--discovery-timeout` saniye boyunca Bonjour ile (`_remotepairing._tcp`) arar ve adresinden
 değil eşleşmeden tanır; iOS özel ve değişen Wi-Fi adresleri kullanıyor. Bilgisayar birden çok
@@ -300,7 +329,7 @@ telefonla eşliyse `--udid` verin.
 Eşleşme, pymobiledevice3'ün tuttuğu bir dosyadır: `~/.local/share/pymobiledevice3/remote_<UDID>.plist`,
 ya da bu klasör zaten varsa `~/.pymobiledevice3/`. İçinde bu bilgisayarın telefonla
 konuşmasını sağlayan anahtar var; ios-homescreen onu hiçbir yere kopyalamaz ve göndermez.
-`wifi disable` telefondaki ayarı kapatır, `wifi disable --forget` eşleşme dosyasını da siler.
+`wifi off` telefondaki ayarı kapatır, `wifi off --forget` eşleşme dosyasını da siler.
 
 Telefona ağ üzerinden ulaşmanın eski yolu (62078 portundaki lockdown, `_apple-mobdev2._tcp`
 olarak bulunur) kullanılmıyor: güncel iOS sürümleri bu bağlantıyı kabul ediyor ama ilk istekte
@@ -310,13 +339,13 @@ her servisi kapatıyor.
 
 | Ne | Varsayılan | Değiştirmek için |
 | --- | --- | --- |
-| Okumalar, yedekler, planlar | `$XDG_DATA_HOME/ios-homescreen` ya da `~/.local/share/ios-homescreen` | `--data-dir`, `IOS_HOMESCREEN_DATA_DIR` |
-| Uygulama simgesi önbelleği (tarayıcı düzenleyicisi, Python API) | `$XDG_CACHE_HOME/ios-homescreen` ya da `~/.cache/ios-homescreen` | `IOS_HOMESCREEN_CACHE_DIR` |
+| Pull kayıtları ve yedekler | `$XDG_DATA_HOME/ios-homescreen` ya da `~/.local/share/ios-homescreen` | `--data-dir`, `IOS_HOMESCREEN_DATA_DIR` |
+| Uygulama simgeleri ve duvar kâğıdı (tarayıcı düzenleyicisi) | `$XDG_CACHE_HOME/ios-homescreen` ya da `~/.cache/ios-homescreen` | `IOS_HOMESCREEN_CACHE_DIR` |
 | Wi-Fi eşleşmesi (pymobiledevice3) | `$XDG_DATA_HOME/pymobiledevice3` ya da `~/.local/share/pymobiledevice3` | `XDG_DATA_HOME` |
 
-Veri klasöründe `reads/read-*.plist` (her birinin yanında `.txt` özeti),
-`backups/backup-*.plist` ve `plans/plan-*.plist` bulunur. Siz bir yol vermedikçe çalışma
-klasörüne hiçbir şey yazılmaz.
+Veri klasöründe `pulls/pull-*.plist` (`pull`, `push` ve düzenleyicinin telefondan
+okudukları) ve `backups/backup-*.plist` bulunur. Başka bir yere yazılan tek dosya, `pull`
+komutunun yazdığı düzen dosyasıdır: çalışma klasöründe `layout.toml` ya da sizin verdiğiniz yol.
 
 ## Python API
 
@@ -328,12 +357,13 @@ from ios_homescreen import api
 async def main():
     device = await api.connect(api.Transport())  # Wi-Fi için api.Transport(wifi=True)
     try:
-        snapshot = await api.read_device(device)
-        view = api.describe(snapshot)  # arayüz için JSON'a hazır düzen
-        plan = api.plan_layout(api.to_document(view), snapshot)
-        result = await api.apply_plan(
+        snapshot = await api.read_device(device)  # pull'un okuduğu
+        text = api.export_layout(snapshot)  # TOML düzen dosyası
+        plan = api.plan_layout(text, snapshot)  # check'in yaptığı; sorun varsa api.LayoutError
+        print(plan.changes)
+        result = await api.push(
             device,
-            plan.payload,
+            plan,
             backup_dir=api.data_dir() / "backups",
             on_event=lambda event: print(event.message),
         )
@@ -346,9 +376,11 @@ asyncio.run(main())
 ```
 
 İlerleme, değişmeyen bir `code` alanı taşıyan `Event` nesneleriyle gelir. Sonuçların ve
-hataların `to_dict()` metodu ve makinenin okuyabileceği kodları var. `api.fetch_icons`
-uygulama simgelerini PNG baytları olarak döndürür, `api.describe_changes(before, after)` iki
-görünüm arasındaki farkları listeler.
+hataların `to_dict()` metodu ve makinenin okuyabileceği kodları var. `api.describe(snapshot)`
+bir arayüz için JSON'a hazır bir görünüm verir, `api.to_document(view)` düzenlenmiş görünümü
+yeniden düzene çevirir; `plan.change_list` değişiklikleri veri olarak tutar. `api.save_pull`,
+`api.list_backups`, `api.find_backup` ve `api.restore` veri klasörüyle komut satırının
+çalıştığı gibi çalışır; `api.fetch_icons` uygulama simgelerini PNG baytları olarak döndürür.
 
 ## Sınırlar
 
@@ -364,7 +396,7 @@ görünüm arasındaki farkları listeler.
 - Boş sayfalar yazılmaz; SpringBoard onları tutmuyor.
 - Sayfa kapasitesi iPhone ızgarasına (6'ya 4) göre hesaplanır. iPad'de denenmedi.
 - Düzen biçimi Apple'ın ve belgelenmemiş; bir iOS güncellemesi onu değiştirebilir.
-  Güncellemeden sonra önce `read` çalıştırın; biçim değişirse yedek ve geri dönüş bunun için var.
+  Güncellemeden sonra yeniden `pull` çalıştırın; biçim değişirse yedek ve geri dönüş bunun için var.
 - Yazma biçimi iOS 26 ve iOS 27 çalışan bir iPhone 15'te doğrulandı.
 
 ## Sorun giderme
@@ -385,13 +417,17 @@ vermediğini gösterir. Misafir ağları ve istemci yalıtımı ikisini birbirin
 duvarı mDNS'e (UDP 5353) izin vermeli.
 
 `this computer has no Wi-Fi pairing yet` ya da eski bir pymobiledevice3 sürümünün yaptığı
-eşleşme: USB üzerinden `wifi enable` komutunu yeniden çalıştırın.
+eşleşme: USB üzerinden `wifi setup` komutunu yeniden çalıştırın.
 
-Tarayıcı, sayfanın terminaldeki adresi istediğini söylüyor: `ios-homescreen ui` komutunun
+Tarayıcı, sayfanın terminaldeki adresi istediğini söylüyor: `ios-homescreen editor` komutunun
 yazdığı adresin tamamını açın. İçindeki anahtar düzenleyici her açıldığında değişir.
 
-`the device layout changed since the read`: `read` komutundan sonra telefonda düzen değişmiş.
-Yeniden `read` ve `plan` çalıştırın; eminseniz `--force` kullanın.
+`the iPhone's layout changed since layout.toml was pulled`: `pull` komutundan sonra telefonda
+düzen değişmiş. Yeni bir dosyaya çekin (`ios-homescreen pull yeni.toml`), değişikliklerinizi
+oraya taşıyıp onu yazın; dosyanızın geçerli olmasını istiyorsanız `--force` kullanın.
+
+`there is no terminal to ask in`: `push` ve `restore` yazmadan önce sorar. Bir betikte,
+değişikliklere `check` ile baktıktan sonra `--yes` ekleyin.
 
 Çıkış kodu 3 (geri dönüldü): telefon yeni düzeni zamanında göstermedi. SpringBoard, özellikle
 Wi-Fi'de, yavaş kalabiliyor. `--verify-attempts 10 --verify-interval 5` deneyin.

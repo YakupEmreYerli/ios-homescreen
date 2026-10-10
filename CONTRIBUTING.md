@@ -23,21 +23,23 @@ uv run pytest
 CI runs the tests on Python 3.11, 3.12 and 3.13. To try another version locally:
 `uv run --python 3.11 pytest`.
 
-To try the browser editor without a phone: `uv run ios-homescreen ui --demo`.
+To try the browser editor without a phone: `uv run ios-homescreen editor --demo`.
 
 ## Layout of the code
 
 | Module | Role |
 | --- | --- |
 | `state.py` | Icon state: plist storage, item kinds and ids, cell counts, comparison, the safe payload, validation |
-| `planner.py` | TOML or JSON layout to plan payload; collects every problem with a code and a location |
-| `export.py` | Read snapshot to an editable TOML layout |
+| `planner.py` | TOML or JSON layout to plan payload; collects every problem with a code and a location, and lists the changes |
+| `export.py` | Pull snapshot to an editable TOML layout |
+| `snapshots.py`, `storage.py` | Pull snapshot and backup files, the data directory, and the `[pull]` link from a layout file |
+| `report.py` | Plain-text change lists and summaries |
 | `model.py` | JSON view of a read for a UI, back to a layout document, and the change list between two views |
 | `workflow.py` | Backup, drift check, timed write, verify by re-reading, rollback |
 | `device.py` | The only code that talks to SpringBoard and Installation Proxy; every call has a time limit |
 | `transport.py` | USB connection, or Wi-Fi through RemotePairing and pymobiledevice3's userspace tunnel |
 | `api.py` | The Python API; no printing, progress through `Event` callbacks |
-| `cli.py` | argparse and printing on top of `api.py` |
+| `cli.py` | argparse, printing and the y/N question on top of `api.py` |
 | `ui/` | The browser editor: `session.py` (jobs, icons, planning), `app.py` (HTTP API), `security.py` (token, Host and Origin checks), `demo.py` (the pretend phone), `static/` (the page) |
 
 The core never prints. If you need to report progress, emit an `Event` with a stable `code`.
@@ -119,8 +121,12 @@ alternative on a device.
   plan. Without that proof, the workflow writes the backup back.
 - Store reads, backups and plans as binary plist. The state has `datetime` and `bytes` values
   that JSON loses.
-- Writes need `--yes`, and without it the command must not even connect. Validate input files
-  before connecting.
+- A write needs a yes: `y` at the prompt, `--yes`, or Apply in the editor. Without a terminal
+  and without `--yes`, `push` and `restore` must not even connect. Validate input files before
+  connecting, and check for a changed phone before asking.
+- A layout file names its pull in `[pull]`; that name is only ever looked up inside
+  `DATA_DIR/pulls`. After a verified push, the CLI saves the new phone state as a pull and
+  points the file at it, so the next push compares against what the phone really has.
 - Import pymobiledevice3 lazily, inside functions. `--help` and the tests must not need it.
 - Wi-Fi uses RemotePairing, not lockdown over TCP. On iOS 17 and later the phone answers on
   port 62078 (`_apple-mobdev2._tcp`) and even validates the pairing, but closes every service
@@ -130,7 +136,7 @@ alternative on a device.
   since the computer is trusted). The phone closes the channel when pairing completes; that
   shows up as `RemotePairingCompletedError` and means success. Records without the phone's
   `peer_alt_irk` (made by older pymobiledevice3 versions) cannot be matched on the network;
-  `wifi enable` replaces them.
+  `wifi setup` replaces them.
 - The Wi-Fi session is pymobiledevice3's `UserspaceRsdTunnel` fed with the service that
   `get_remote_pairing_tunnel_services` found. The tunnel asks a module function for its
   provider; `transport.py` swaps that function only for the length of `aopen()` and puts it
@@ -152,8 +158,8 @@ checked on real phones. To bump it:
 
 1. Change the pin and run `uv lock`.
 2. Run the tests, including `tests/test_pymobiledevice3_contract.py`.
-3. On a real phone: `read`, then `apply` a plan that only moves one app, then `restore` the
-   backup. Do it over USB and over Wi-Fi, and say in the pull request what you tested.
+3. On a real phone: `pull`, move one app in the file, `push`, then `restore latest`. Do it
+   over USB and over Wi-Fi, and say in the pull request what you tested.
 
 ## Commits and pull requests
 

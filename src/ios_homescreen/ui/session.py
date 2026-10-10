@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import re
 import secrets
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
@@ -25,22 +24,18 @@ from typing import Any
 from .. import api
 from ..events import ERROR, WARNING, Event
 from ..icons import IconCache
-from ..model import describe, describe_changes, to_document
-from ..paths import PLANS, READS, cache_dir
+from ..model import describe, describe_changes, match_folders, to_document
+from ..paths import cache_dir
 from ..planner import LayoutError, Plan, load_layout, plan_layout
-from ..snapshots import timestamp
 from ..state import (
     PAGE_CELLS,
-    StateError,
-    folder_pages,
     is_folder,
     is_hidden_app,
     item_kind,
     iter_items,
-    load_plist,
     same_layout,
-    split_state,
 )
+from ..storage import find_backup, list_backups, save_pull
 from ..transport import Backend, Transport, TransportError
 from ..workflow import Timing
 from .errors import friendly
@@ -51,8 +46,6 @@ ICON_BATCH = 16
 WIFI_RETRY_CODES = frozenset({"not_advertising", "timeout"})
 WIFI_RETRY_DISCOVERY = 12.0
 MAX_BACKUPS = 100
-_BACKUP_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,200}\.plist$")
-_STAMP = re.compile(r"(\d{8}-\d{6})")
 
 Opener = Callable[[Callable[[Event], None]], Awaitable[Any]]
 
@@ -228,7 +221,7 @@ class Session:
         self.job: Job | None = None
         self.icon_task: asyncio.Task[Any] | None = None
         self.icons_pending = False
-        self._backup_summaries: dict[tuple[str, int, int], dict[str, Any] | None] = {}
+        self._backup_details: dict[tuple[str, int, int], Any] = {}
 
     # ------------------------------------------------------------------ connection
 
@@ -324,9 +317,7 @@ class Session:
             job.emit(Event("reading", "Reading the home screen (read-only)...", 1, 2))
             snapshot = await api.read_device(device)
             saved = self._keep_read(snapshot)
-            job.emit(
-                Event("read_saved", f"Read saved as {saved.name}.", 2, 2, data={"path": saved})
-            )
+            job.emit(Event("read_saved", f"Saved as {saved.name}.", 2, 2, data={"path": saved}))
             handed_over = self._fetch_icons(device)
         finally:
             if not handed_over:
@@ -334,17 +325,17 @@ class Session:
         return {"read": saved.name}
 
     def _keep_read(self, snapshot: dict[str, Any]) -> Path:
-        saved = api.save_read(snapshot, self.settings.data_dir / READS)
+        saved = save_pull(snapshot, self.settings.data_dir)
         self.read = snapshot
         self.view = describe(snapshot)
-        self.read_file = saved.path
+        self.read_file = saved
         self.read_at = _now()
         self.last_error = None
         if self._fixed_icons is None:
             udid = (snapshot.get("device") or {}).get("udid")
             store = DiskIcons.for_device(udid, self.settings.cache_root or cache_dir())
             self.icons = DiskIcons(store.directory)
-        return saved.path
+        return saved
 
     def _wanted_icons(self) -> list[str]:
         if self.read is None:
@@ -384,8 +375,8 @@ class Session:
     def plan(
         self, layout: Mapping[str, Any], remove: Iterable[str] = ()
     ) -> tuple[Plan | None, list[dict[str, Any]]]:
-        """Plan a UI layout. Removing widgets, web clips and web apps needs their ids
-        in ``remove`` (the user confirmed it), like ``plan --allow-removal``."""
+        """Plan a UI layout. Removing widgets needs their ids in ``remove`` (the user
+        confirmed it), like ``push --allow-removal``."""
         if self.read is None:
             raise NoRead("read the phone first")
         trimmed, numbers = _strip_empty_pages(layout)
@@ -438,12 +429,8 @@ class Session:
         plan, issues = self.plan(layout, remove)
         if plan is None:
             raise LayoutProblems(issues)
-        if self.job is not None and self.job.running:
-            raise Busy(f"the phone is busy ({self.job.kind} is running)")
-        path = api.save_plan(plan, self.settings.data_dir / PLANS / f"plan-{timestamp()}.plist")
 
         async def work(job: Job) -> dict[str, Any]:
-            job.emit(Event("plan_saved", f"Plan saved as {path.name}.", data={"path": path}))
             return await self._write_job(job, "apply", plan.payload, force=force)
 
         return self._start("apply", work)
@@ -470,7 +457,7 @@ class Session:
                 "on_event": job.emit,
             }
             if kind == "apply":
-                result = await api.apply_plan(device, target, force=force, **common)
+                result = await api.push(device, target, force=force, **common)
             else:
                 result = await api.restore(device, target, **common)
             outcome = {k: v for k, v in result.to_dict().items() if k != "events"}
@@ -566,10 +553,10 @@ class Session:
             raise LayoutProblems(issues)
         assert self.read is not None
         state = {"buttonBar": plan.payload["buttonBar"], "iconLists": plan.payload["iconLists"]}
-        source = self.read_file.name if self.read_file else "ios-homescreen ui"
         return api.export_layout(
             {"state": state, "apps": self.read.get("apps", {})},
-            source=f"{source}, edited in ios-homescreen ui",
+            pull=self.read_file.name if self.read_file else None,
+            note=f"Edited in the ios-homescreen editor. {api.pull_note(self.read)}",
         )
 
     def import_layout(self, text: str) -> dict[str, Any]:
@@ -582,19 +569,8 @@ class Session:
             raise LayoutProblems([issue.to_dict() for issue in error.issues]) from error
         state = {"buttonBar": plan.payload["buttonBar"], "iconLists": plan.payload["iconLists"]}
         view = describe({"state": state, "apps": self.read.get("apps", {})})
-        # Folders have no ids on the phone; keep the current ids for folders by name.
-        known: dict[str, str] = {}
-        for item in [*self.view["dock"], *(i for p in self.view["pages"] for i in p["items"])]:
-            if item.get("type") == "folder":
-                known.setdefault(item["name"], item["id"])
-        used: set[str] = set()
-        for item in [*view["dock"], *(i for p in view["pages"] for i in p["items"])]:
-            if item.get("type") == "folder":
-                ident = known.get(item["name"])
-                if ident is None or ident in used:
-                    ident = f"imported-{item['id']}"
-                used.add(ident)
-                item["id"] = ident
+        # Folders have no ids on the phone; keep the current ids for the same folders.
+        match_folders(self.view, view, prefix="imported")
         names = {}
         for item in iter_items(self.read["state"]):
             if not is_folder(item) and item_kind(item) in {"widget", "webclip", "webapp"}:
@@ -605,59 +581,16 @@ class Session:
         }
 
     def backup_path(self, name: str) -> Path:
-        directory = self.settings.backup_dir
-        if not isinstance(name, str) or not _BACKUP_NAME.match(name):
-            raise StateError("not a backup file name")
-        path = directory / name
-        if not path.is_file() or path.resolve().parent != directory.resolve():
-            raise StateError(f"no backup named {name}")
-        return path
+        """A backup by its plain file name in the backup directory, nothing else."""
+        return find_backup(self.settings.backup_dir, name, allow_paths=False)
 
     def backups(self) -> list[dict[str, Any]]:
-        directory = self.settings.backup_dir
-        if not directory.is_dir():
-            return []
-        files = sorted(
-            (p for p in directory.glob("*.plist") if _BACKUP_NAME.match(p.name)),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )[:MAX_BACKUPS]
-        found = []
-        for path in files:
-            stat = path.stat()
-            found.append(
-                {
-                    "name": path.name,
-                    "created": _created(path.name, stat.st_mtime),
-                    "size": stat.st_size,
-                    "summary": self._backup_summary(path, stat.st_mtime_ns, stat.st_size),
-                }
+        return [
+            backup.to_dict()
+            for backup in list_backups(
+                self.settings.backup_dir, limit=MAX_BACKUPS, cache=self._backup_details
             )
-        return found
-
-    def _backup_summary(self, path: Path, mtime: int, size: int) -> dict[str, Any] | None:
-        key = (path.name, mtime, size)
-        if key not in self._backup_summaries:
-            try:
-                state = load_plist(path)
-                if isinstance(state, dict) and "state" in state:
-                    state = state["state"]
-                dock, pages = split_state(state)
-                apps = 0
-                for section in [dock, *pages]:
-                    for item in section:
-                        if is_folder(item):
-                            apps += sum(len(page) for page in folder_pages(item))
-                        else:
-                            apps += 1
-                self._backup_summaries[key] = {
-                    "dock": len(dock),
-                    "pages": len(pages),
-                    "items": apps,
-                }
-            except Exception:
-                self._backup_summaries[key] = None
-        return self._backup_summaries[key]
+        ]
 
 
 def item_label(item: Mapping[str, Any], read: Mapping[str, Any]) -> str:
@@ -672,14 +605,6 @@ def item_label(item: Mapping[str, Any], read: Mapping[str, Any]) -> str:
         label = str(meta["name"])
         return f"{label} widget" if item_kind(item) == "widget" else f"{label} web app"
     return str(item.get("displayIdentifier", "?"))
-
-
-def _created(name: str, mtime: float) -> str:
-    match = _STAMP.search(name)
-    if match:
-        with contextlib.suppress(ValueError):
-            return datetime.strptime(match.group(1), "%Y%m%d-%H%M%S").isoformat()
-    return datetime.fromtimestamp(mtime).isoformat(timespec="seconds")
 
 
 def api_version() -> str:

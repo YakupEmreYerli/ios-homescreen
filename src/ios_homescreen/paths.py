@@ -1,7 +1,9 @@
-"""Where reads, backups and plans live.
+"""Where pull snapshots, backups and cached images live.
 
 Nothing is written to the working directory unless asked: the default is the XDG data
-directory, ``$XDG_DATA_HOME/ios-homescreen`` or ``~/.local/share/ios-homescreen``.
+directory, ``$XDG_DATA_HOME/ios-homescreen`` or ``~/.local/share/ios-homescreen``. Only
+the layout file that ``pull`` writes goes where the user says (``layout.toml`` in the
+current directory by default).
 """
 
 from __future__ import annotations
@@ -14,10 +16,12 @@ APP_NAME = "ios-homescreen"
 DATA_DIR_ENV = "IOS_HOMESCREEN_DATA_DIR"
 CACHE_DIR_ENV = "IOS_HOMESCREEN_CACHE_DIR"
 
-READS = "reads"
+PULLS = "pulls"
 BACKUPS = "backups"
-PLANS = "plans"
 ICONS = "icons"
+WALLPAPERS = "wallpapers"
+
+DEFAULT_LAYOUT = "layout.toml"
 
 
 def data_dir(env: Mapping[str, str] | None = None, *, home: Path | None = None) -> Path:
@@ -33,7 +37,7 @@ def data_dir(env: Mapping[str, str] | None = None, *, home: Path | None = None) 
 
 
 def cache_dir(env: Mapping[str, str] | None = None, *, home: Path | None = None) -> Path:
-    """``$XDG_CACHE_HOME/ios-homescreen`` or ``~/.cache/ios-homescreen`` (app icons)."""
+    """``$XDG_CACHE_HOME/ios-homescreen`` or ``~/.cache/ios-homescreen`` (icons, wallpaper)."""
     env = os.environ if env is None else env
     override = env.get(CACHE_DIR_ENV)
     if override:

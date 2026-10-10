@@ -1,28 +1,11 @@
-"""Human-readable summaries and offline layout diffs."""
+"""Plain-text summaries: what a layout holds and what a write would change."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
-from .state import (
-    PAGE_CELLS,
-    counts_for_home_screen,
-    folder_pages,
-    is_folder,
-    is_hidden_app,
-    item_id,
-    item_kind,
-    item_name,
-    page_usage,
-    same_layout,
-    split_state,
-    visible_apps,
-)
-
-
-def _app_meta(meta: Any, key: str, fallback: str) -> str:
-    return str(meta.get(key, fallback)) if isinstance(meta, Mapping) else fallback
+from .state import counts_for_home_screen, is_hidden_app, split_state, visible_apps
 
 
 def library_apps(state: Any, apps: Mapping[str, Any]) -> list[str]:
@@ -38,51 +21,6 @@ def library_apps(state: Any, apps: Mapping[str, Any]) -> list[str]:
     )
 
 
-def read_summary(
-    state: Any,
-    apps: Mapping[str, Any],
-    *,
-    device: Mapping[str, Any] | None = None,
-    raw_v3_error: str | None = None,
-) -> str:
-    dock, pages = split_state(state)
-    lines = ["Home screen summary"]
-    if device:
-        described = ", ".join(
-            str(device[key]) for key in ("name", "model", "ios_version") if device.get(key)
-        )
-        if described:
-            lines.append(f"Device: {described}")
-    lines += ["", "Dock: " + (", ".join(item_name(x) for x in dock) or "empty")]
-    for page_no, page in enumerate(pages, 1):
-        lines.append(f"\nPage {page_no}: {page_usage(page)}/{PAGE_CELLS} cells")
-        for item in page:
-            kind = item_kind(item)
-            if kind == "folder":
-                lines.append(f"  Folder: {item_name(item)}")
-                for folder_page_no, folder_page in enumerate(folder_pages(item), 1):
-                    names = ", ".join(item_name(x) for x in folder_page)
-                    lines.append(f"    page {folder_page_no}: {names}")
-            elif kind == "widget":
-                lines.append(f"  Widget: {item_name(item)} [{item.get('gridSize', 'small')}]")
-            elif kind == "webclip":
-                lines.append(f"  Web clip: {item_name(item)} ({item_id(item)})")
-            elif kind == "webapp":
-                lines.append(f"  Web app of {item.get('bundleIdentifier')}: {item_id(item)}")
-            else:
-                lines.append(f"  App: {item_name(item)} ({item_id(item)})")
-    hidden = library_apps(state, apps)
-    lines.append(f"\nOnly in the App Library ({len(hidden)}):")
-    for ident in hidden:
-        meta = apps[ident]
-        name = _app_meta(meta, "name", ident)
-        kind = _app_meta(meta, "type", "?")
-        lines.append(f"  {name} - {ident} [{kind}]")
-    if raw_v3_error is not None:
-        lines.append(f"\nRaw format version 3 read failed: {raw_v3_error}")
-    return "\n".join(lines) + "\n"
-
-
 def overview(state: Any, apps: Mapping[str, Any]) -> str:
     dock, pages = split_state(state)
     return (
@@ -91,55 +29,96 @@ def overview(state: Any, apps: Mapping[str, Any]) -> str:
     )
 
 
-def _locations(state: Any) -> dict[str, str]:
-    dock, pages = split_state(state)
-    found: dict[str, str] = {}
+# --------------------------------------------------------------------------- changes
 
-    def add(item: Any, where: str) -> None:
-        if is_folder(item):
-            for folder_page in folder_pages(item):
-                for inner in folder_page:
-                    found[item_id(inner)] = f"{where} / folder {item_name(item)!r}"
-            return
-        found[item_id(item)] = where
-
-    for item in dock:
-        add(item, "dock")
-    for page_no, page in enumerate(pages, 1):
-        for item in page:
-            add(item, f"page {page_no}")
-    return found
+_SUBJECT_WIDTH = 30
 
 
-def _label(item: Any) -> str:
-    if is_folder(item):
-        inner = ",".join(item_id(x) for folder_page in folder_pages(item) for x in folder_page)
-        return f"folder:{item_name(item)}[{inner}]"
-    if item_kind(item) == "widget":
-        return f"{item_id(item)}/{item.get('gridSize', 'small')}"
-    return item_id(item)
+def _subject(change: Mapping[str, Any]) -> str:
+    name = str(change.get("name") or change.get("id") or "?")
+    kind = change.get("type")
+    if kind == "folder":
+        return f'Folder "{name}"'
+    if kind == "widget" and not name.lower().endswith("widget"):
+        return f"{name} widget"
+    return name
 
 
-def diff_text(before: Any, after: Any) -> str:
-    """Explain moves, additions, removals and order changes between two layouts."""
-    old, new = _locations(before), _locations(after)
-    lines: list[str] = []
-    for ident in sorted(old.keys() & new.keys()):
-        if old[ident] != new[ident]:
-            lines.append(f"Moved: {ident}: {old[ident]} -> {new[ident]}")
-    lines.extend(f"Added: {ident}: {new[ident]}" for ident in sorted(new.keys() - old.keys()))
-    lines.extend(f"Removed: {ident}: {old[ident]}" for ident in sorted(old.keys() - new.keys()))
-    if not same_layout(before, after):
-        old_dock, old_pages = split_state(before)
-        new_dock, new_pages = split_state(after)
-        old_sections = {"dock": old_dock} | {f"page {n}": p for n, p in enumerate(old_pages, 1)}
-        new_sections = {"dock": new_dock} | {f"page {n}": p for n, p in enumerate(new_pages, 1)}
-        lines.append("Order or structure changed:")
-        for name in [*dict.fromkeys([*old_sections, *new_sections])]:
-            was = [_label(x) for x in old_sections.get(name, [])]
-            now = [_label(x) for x in new_sections.get(name, [])]
-            if (name in old_sections) != (name in new_sections) or was != now:
-                lines.append(f"  {name}:")
-                lines.append("    before: " + (", ".join(was) if name in old_sections else "-"))
-                lines.append("    after:  " + (", ".join(now) if name in new_sections else "-"))
-    return "\n".join(lines or ["No layout differences."]) + "\n"
+def _container(where: Mapping[str, Any]) -> str:
+    if where.get("folder") is not None:
+        return f'the "{where["folder"]}" folder'
+    if where.get("section") == "dock":
+        return "the dock"
+    return f"page {where.get('page', '?')}"
+
+
+def _place(where: Mapping[str, Any] | None) -> str:
+    if not where:
+        return "?"
+    text = _container(where)
+    return f"{text}, position {where['index']}" if where.get("index") else text
+
+
+def _what(change: Mapping[str, Any]) -> str:
+    kind = change["kind"]
+    to, was = change.get("to"), change.get("from")
+    if kind == "added" and change.get("type", "app") == "app":
+        return f"comes from the App Library to {_place(to)}"
+    if kind == "added":
+        return f"comes back on {_place(to)}"
+    if kind == "moved":
+        return f"moves from {_container(was or {})} to {_place(to)}"
+    if kind == "reordered":
+        return f"moves to position {(to or {}).get('index', '?')} in {_container(to or {})}"
+    if kind == "to_library":
+        return "goes to the App Library (stays installed)"
+    if kind == "removed":
+        return "is removed; add it again on the iPhone to get it back"
+    if kind == "folder_created":
+        return f"is a new folder on {_place(to)}"
+    if kind == "folder_renamed":
+        return f'was "{change.get("old_name", "")}"'
+    if kind == "folder_deleted":
+        return "is removed (its apps are listed on their own)"
+    return kind
+
+
+def change_lines(changes: Iterable[Mapping[str, Any]]) -> list[str]:
+    """One aligned line per change from :func:`ios_homescreen.model.describe_changes`."""
+    rows: list[tuple[str, str]] = []
+    for change in changes:
+        if change["kind"] == "pages":
+            rows.append(("Pages", f"{change['before']} become {change['after']}"))
+        else:
+            rows.append((_subject(change), _what(change)))
+    width = min(_SUBJECT_WIDTH, max((len(subject) for subject, _ in rows), default=0))
+    lines = []
+    for subject, what in rows:
+        if len(subject) > width:
+            subject = subject[: width - 1] + "…"
+        lines.append(f"  {subject.ljust(width)}  {what}")
+    return lines
+
+
+def change_summary(changes: Iterable[Mapping[str, Any]]) -> str:
+    """``3 moved, 1 added and 1 to the App Library.`` or ``No changes.``"""
+    changes = list(changes)
+
+    def count(*kinds: str) -> int:
+        return sum(1 for change in changes if change["kind"] in kinds)
+
+    parts = []
+    for number, label in (
+        (count("moved", "reordered"), "moved"),
+        (count("added", "folder_created"), "added"),
+        (count("to_library"), "to the App Library"),
+        (count("removed"), "removed"),
+        (count("folder_renamed"), "renamed"),
+        (count("folder_deleted"), "folders removed"),
+    ):
+        if number:
+            parts.append(f"{number} {label}")
+    if not parts:
+        return "No changes." if not changes else "Pages change."
+    text = ", ".join(parts[:-1]) + (" and " if len(parts) > 1 else "") + parts[-1]
+    return text[0].upper() + text[1:] + "."
