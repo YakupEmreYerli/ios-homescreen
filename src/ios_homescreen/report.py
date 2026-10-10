@@ -5,7 +5,17 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from .state import counts_for_home_screen, is_hidden_app, split_state, visible_apps
+from .state import (
+    app_type,
+    counts_for_home_screen,
+    folder_pages,
+    is_folder,
+    is_hidden_app,
+    item_id,
+    item_kind,
+    split_state,
+    visible_apps,
+)
 
 
 def library_apps(state: Any, apps: Mapping[str, Any]) -> list[str]:
@@ -27,6 +37,75 @@ def overview(state: Any, apps: Mapping[str, Any]) -> str:
         f"dock {len(dock)} items, {len(pages)} pages, "
         f"{len(library_apps(state, apps))} apps only in the App Library"
     )
+
+
+def app_places(read: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Every app a person can see, by name, and where it is.
+
+    ``where`` is ``{"section": "dock" | "page" | "library"}`` plus ``page`` and ``index``
+    (1-based, counting every item on the page in order, widgets included) and, inside a
+    folder, ``folder``, ``folder_page`` and ``folder_index``.
+    """
+    state = read["state"]
+    apps: Mapping[str, Any] = read.get("apps", {}) or {}
+    found: dict[str, dict[str, Any]] = {}
+
+    def add(item: Any, where: dict[str, Any]) -> None:
+        if item_kind(item) != "app":
+            return
+        ident = item_id(item)
+        meta = apps.get(ident)
+        name = (
+            (isinstance(item, Mapping) and item.get("displayName"))
+            or (isinstance(meta, Mapping) and meta.get("name"))
+            or ident
+        )
+        found.setdefault(
+            ident,
+            {
+                "name": str(name),
+                "id": ident,
+                "type": app_type(meta) or "",
+                "offloaded": isinstance(item, Mapping) and not item.get("bundleIdentifier"),
+                "where": where,
+            },
+        )
+
+    def place(item: Any, where: dict[str, Any]) -> None:
+        if not is_folder(item):
+            add(item, where)
+            return
+        for folder_page, page in enumerate(folder_pages(item), 1):
+            for position, inner in enumerate(page, 1):
+                add(
+                    inner,
+                    {
+                        **where,
+                        "folder": str(item.get("displayName", "")),
+                        "folder_page": folder_page,
+                        "folder_index": position,
+                    },
+                )
+
+    dock, pages = split_state(state)
+    for position, item in enumerate(dock, 1):
+        place(item, {"section": "dock", "index": position})
+    for page_no, page in enumerate(pages, 1):
+        for position, item in enumerate(page, 1):
+            place(item, {"section": "page", "page": page_no, "index": position})
+    for ident in library_apps(state, apps):
+        meta = apps[ident]
+        found.setdefault(
+            ident,
+            {
+                "name": str(meta.get("name", ident)),
+                "id": ident,
+                "type": app_type(meta) or "",
+                "offloaded": False,
+                "where": {"section": "library"},
+            },
+        )
+    return sorted(found.values(), key=lambda app: (app["name"].casefold(), app["id"]))
 
 
 # --------------------------------------------------------------------------- changes

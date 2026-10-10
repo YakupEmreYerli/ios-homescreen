@@ -44,10 +44,10 @@ def save_pull(snapshot: Mapping[str, Any], data_dir: Path) -> Path:
 def _named(directory: Path, name: Any, what: str) -> Path:
     """A plain file name inside ``directory``; anything that could point elsewhere fails."""
     if not isinstance(name, str) or not _NAME.match(name):
-        raise StateError(f"{name!r} is not a {what} file name")
+        raise StateError(f"{name!r} is not a {what} file name", code="bad_name")
     path = directory / name
     if not path.is_file() or path.resolve().parent != directory.resolve():
-        raise StateError(f"there is no {what} named {name} in {directory}")
+        raise StateError(f"there is no {what} named {name} in {directory}", code="not_found")
     return path
 
 
@@ -63,7 +63,8 @@ def newest_pull(data_dir: Path) -> Path:
     if found is None:
         raise StateError(
             f"nothing has been pulled yet (no snapshot in {Path(data_dir) / PULLS}); "
-            "run 'ios-homescreen pull' first"
+            "run 'ios-homescreen pull' first",
+            code="no_pull",
         )
     return found
 
@@ -87,7 +88,8 @@ def find_pull(document: Mapping[str, Any], data_dir: Path) -> tuple[Path, bool]:
         raise StateError(
             f"{exc}. The layout file was pulled on another computer or with another "
             "--data-dir, or the snapshot was deleted; pull into a new file and carry "
-            "your edits over"
+            "your edits over",
+            code="pull_missing",
         ) from exc
 
 
@@ -208,7 +210,7 @@ def find_backup(directory: Path, ref: str, *, allow_paths: bool = True) -> Path:
     if ref == LATEST:
         files = _backup_files(directory)
         if not files:
-            raise StateError(f"there are no backups in {directory} yet")
+            raise StateError(f"there are no backups in {directory} yet", code="no_backup")
         return files[0]
     name = ref if ref.endswith(".plist") else f"{ref}.plist"
     if _NAME.match(name) and (directory / name).is_file():
@@ -218,5 +220,6 @@ def find_backup(directory: Path, ref: str, *, allow_paths: bool = True) -> Path:
         if path.is_file():
             return path
     raise StateError(
-        f"there is no backup named {ref} in {directory} (list them with 'ios-homescreen backups')"
+        f"there is no backup named {ref} in {directory} (list them with 'ios-homescreen backups')",
+        code="no_backup",
     )

@@ -23,6 +23,24 @@ istediğiniz düzene gelmediyse yedeği kendiliğinden geri yazar.
 Simgeleri sürükleyerek çalışmayı seviyorsanız `ios-homescreen editor` aynı işi tarayıcıda
 yapar.
 
+## Bir yapay zekâ asistanıyla kullanmak
+
+Claude Code, Codex ya da Cursor gibi bir kodlama asistanı kurulumu da düzenlemeyi de sizin
+yerinize yapabilir. Ona şunu verin, sonuna kendi isteğinizi yazın:
+
+```text
+https://github.com/YakupEmreYerli/ios-homescreen/blob/main/docs/agent-guide.md dosyasını oku
+ve ios-homescreen ile iPhone ana ekranımı düzenlememe yardım et. Gerekiyorsa kur, telefona
+bir şey yazmadan önce her değişikliği bana göster ve onayımı bekle. İstediğim: iş
+uygulamalarımı tek bir klasöre koy, oyunları 2. sayfaya taşı.
+```
+
+[Asistan rehberi](docs/agent-guide.md) asistana aracı nasıl kurup kullanacağını anlatır;
+telefona bir şey yazmadan önce değişiklikleri size göstermesi ve onayınızı beklemesi
+gerektiğini de söyler. Telefonu bağlamak ve Güven'e dokunmak yine size kalır. Claude Code
+için aynı akışı izleyen bir skill de var: [`skills/ios-homescreen`](skills/ios-homescreen)
+klasörünü `~/.claude` içindeki `skills` klasörüne (ya da projenin `.claude` klasöründeki `skills` klasörüne) kopyalayın.
+
 ## Özellikler
 
 - Dock'u, sayfaları, klasörleri (çok sayfalı klasörler dahil), widget'ları, widget
@@ -117,6 +135,7 @@ ios-homescreen restore latest
 | `pull [LAYOUT]` | Ana ekranı bir düzen dosyasına (varsayılan `layout.toml`) yazar, telefonun o anki hâlini de kayıt olarak saklar | Yalnız okur |
 | `check [LAYOUT]` | Dosyayı denetler, `push` komutunun pull kaydına göre neyi değiştireceğini listeler | Hayır |
 | `push [LAYOUT]` | Değişiklikleri gösterip sorar; sonra yedek alır, yazar, doğrular, tutmazsa geri döner | Yazar |
+| `apps [QUERY]` | Kurulu uygulamaları paket kimlikleri ve her birinin şu anki yeriyle listeler (en yeni pull kaydından) | Hayır |
 | `editor` | Tarayıcı düzenleyicisini 127.0.0.1 üzerinde açar | Okur; yalnız Uygula'ya basınca yazar |
 | `backups` | Her yazmadan önce alınan yedekleri listeler: ne zaman, hangi iPhone, düzende ne vardı | Hayır |
 | `restore BACKUP` | Bir yedeği (`latest`, `backups` listesindeki bir ad ya da bir dosya) `push` ile aynı adımlarla geri yazar | Yazar |
@@ -127,7 +146,10 @@ başka bir dosyaya çekin ya da `--overwrite` verin. `check` ve `push` komutlar�
 `--allow-removal` alır (düzen dosyası bölümüne bakın); `push` ve `restore` komutları
 `--force` alır (güvenlik bölümüne bakın). `backups` en yeni 20 yedeği gösterir, `--all`
 hepsini listeler. `wifi` dışındaki bütün komutlar `--data-dir DIR` alır; `push`,
-`restore`, `editor` ve `backups` ayrıca `--backup-dir DIR` alır.
+`restore`, `editor` ve `backups` ayrıca `--backup-dir DIR` alır. `editor` dışındaki bütün
+komutlar `--json` alır ve stdout'a tek bir JSON nesnesi yazar; betikler ve asistanlar için
+olan bu çıktıyı [asistan rehberi](docs/agent-guide.md) anlatır. `--json` ile `push` ve
+`restore` hiçbir şey sormaz: `--yes` yoksa yalnız neyin değişeceğini bildirir.
 
 Bağlantı seçenekleri (`pull`, `push`, `restore`, `editor`, `wifi`):
 

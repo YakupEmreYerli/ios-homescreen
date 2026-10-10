@@ -22,6 +22,24 @@ phone does not end up with the layout you asked for.
 
 If you would rather drag icons around, `ios-homescreen editor` does the same in a browser.
 
+## Use it with an AI agent
+
+A coding agent such as Claude Code, Codex or Cursor can do the setup and the editing for
+you. Give it this, with your own wish at the end:
+
+```text
+Read https://github.com/YakupEmreYerli/ios-homescreen/blob/main/docs/agent-guide.md and
+help me rearrange my iPhone home screen with ios-homescreen. Install it if needed, show me
+every change before anything is written to the phone, and wait for my yes. What I want:
+put my work apps in one folder and move the games to page 2.
+```
+
+The [agent guide](docs/agent-guide.md) tells the agent how to install and use the tool, and
+that it must show you the changes and wait for your yes before anything is written. You
+still connect the phone and tap Trust yourself. For Claude Code there is also a skill with
+the same workflow: copy [`skills/ios-homescreen`](skills/ios-homescreen) to
+the `skills` folder inside `~/.claude` (or inside a project's `.claude` folder).
+
 ## Features
 
 - Pulls the dock, pages, folders (including multi-page folders), widgets, widget stacks,
@@ -112,6 +130,7 @@ ios-homescreen restore latest
 | `pull [LAYOUT]` | Reads the home screen into a layout file (`layout.toml` by default) and keeps the phone's state as a snapshot | Reads only |
 | `check [LAYOUT]` | Checks the file and lists what `push` would change, compared with the pull | No |
 | `push [LAYOUT]` | Shows the changes, asks, then backs up, writes, verifies and rolls back on failure | Writes |
+| `apps [QUERY]` | Lists the installed apps with their bundle ids and where each one is, from the newest pull | No |
 | `editor` | Opens the browser editor on 127.0.0.1 | Reads; writes only when you press Apply |
 | `backups` | Lists the backups made before each write: when, which iPhone, what the layout held | No |
 | `restore BACKUP` | Writes a backup back (`latest`, a name from `backups`, or a file), with the same steps as `push` | Writes |
@@ -121,7 +140,10 @@ ios-homescreen restore latest
 file, or pass `--overwrite`. `check` and `push` take `--allow-removal` (see the layout
 reference); `push` and `restore` take `--force` (see the safety model). `backups` shows the 20
 newest; `--all` lists every one. Every command except `wifi` takes `--data-dir DIR`;
-`push`, `restore`, `editor` and `backups` also take `--backup-dir DIR`.
+`push`, `restore`, `editor` and `backups` also take `--backup-dir DIR`. All commands but
+`editor` take `--json` and then print one JSON object on stdout, for scripts and agents;
+the [agent guide](docs/agent-guide.md) describes it. With `--json`, `push` and `restore`
+never ask: without `--yes` they only report what would change.
 
 Connection options, for `pull`, `push`, `restore`, `editor` and `wifi`:
 

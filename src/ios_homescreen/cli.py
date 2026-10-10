@@ -1,9 +1,15 @@
-"""Command line interface: pull, check, push, editor, backups, restore, wifi."""
+"""Command line interface: pull, check, push, editor, backups, restore, apps, wifi.
+
+With ``--json`` a command prints exactly one JSON object on stdout (the schema is in
+``docs/agent-guide.md``); its progress and messages go to stderr, and the exit codes stay
+the same.
+"""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import sys
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
@@ -14,10 +20,18 @@ from .events import Event
 from .export import pull_source
 from .paths import BACKUPS, DATA_DIR_ENV, DEFAULT_LAYOUT, data_dir
 from .planner import Plan
-from .report import change_lines, change_summary, library_apps, overview
-from .snapshots import device_of
+from .report import app_places, change_lines, change_summary, library_apps, overview
+from .snapshots import device_details, device_of
 from .state import fingerprint, same_layout
-from .storage import Backup, find_backup, find_pull, list_backups, point_layout_at
+from .storage import (
+    Backup,
+    find_backup,
+    find_pull,
+    layout_counts,
+    list_backups,
+    newest_pull,
+    point_layout_at,
+)
 from .transport import DEFAULT_CONNECT_TIMEOUT, DEFAULT_DISCOVERY_TIMEOUT, Transport
 from .workflow import APPLIED, ROLLBACK_FAILED, ROLLED_BACK, Timing, WorkflowError
 
@@ -33,8 +47,38 @@ BACKUPS_SHOWN = 20
 Opener = Callable[[Transport], Awaitable[Any]]
 
 
+class _Output:
+    """What one run prints: plain text, or (``--json``) one object on stdout at the end."""
+
+    def __init__(self) -> None:
+        self.json = False
+        self.data: dict[str, Any] = {}
+
+
+_out = _Output()
+
+
 def say(message: str = "") -> None:
-    print(message, flush=True)
+    print(message, file=sys.stderr if _out.json else sys.stdout, flush=True)
+
+
+def report(**fields: Any) -> None:
+    """Fields of the ``--json`` result."""
+    _out.data.update(fields)
+
+
+def failed(code: str, message: str, **extra: Any) -> None:
+    """The ``--json`` error object for a run that ends with a non-zero exit code."""
+    _out.data["error"] = {"code": code, "message": message, **extra}
+
+
+class Refused(Exception):
+    """The command refuses before doing anything; ``code`` goes into the JSON error."""
+
+    def __init__(self, message: str, *, code: str, exit_code: int = 1) -> None:
+        super().__init__(message)
+        self.code = code
+        self.exit_code = exit_code
 
 
 def warn(message: str) -> None:
@@ -192,6 +236,14 @@ def _layout_argument(parser: argparse.ArgumentParser, help_text: str) -> None:
     )
 
 
+def _json(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="print one JSON object on stdout (for scripts and AI agents); messages go to stderr",
+    )
+
+
 def _allow_removal(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--allow-removal",
@@ -233,6 +285,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     _layout_argument(pull, "layout file to write")
+    _json(pull)
     pull.add_argument(
         "--overwrite",
         action="store_true",
@@ -252,6 +305,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _layout_argument(check, "layout file to check")
     _allow_removal(check)
+    _json(check)
 
     push = commands.add_parser(
         "push",
@@ -274,6 +328,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="write even if the phone's layout changed since the pull",
     )
     _allow_removal(push)
+    _json(push)
 
     editor = commands.add_parser(
         "editor",
@@ -328,6 +383,7 @@ def build_parser() -> argparse.ArgumentParser:
     backups.add_argument(
         "--all", action="store_true", help=f"list every backup, not only the {BACKUPS_SHOWN} newest"
     )
+    _json(backups)
 
     restore = commands.add_parser(
         "restore",
@@ -352,6 +408,24 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="restore a backup that was made on another iPhone",
     )
+    _json(restore)
+
+    apps = commands.add_parser(
+        "apps",
+        parents=[files],
+        formatter_class=_Formatter,
+        usage="%(prog)s [QUERY] [--json] [--data-dir DIR]",
+        help="list the installed apps and where each one is (offline)",
+        description=(
+            "List the apps on the phone as of the newest pull, with their bundle ids and\n"
+            "where each one is: the dock, a page, a folder, or only the App Library. Use the\n"
+            "names or ids in a layout file. Offline: the phone is not contacted."
+        ),
+    )
+    apps.add_argument(
+        "query", nargs="?", metavar="QUERY", help="only apps whose name or bundle id contains this"
+    )
+    _json(apps)
 
     wifi = commands.add_parser(
         "wifi",
@@ -377,6 +451,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="with off: also delete this computer's Wi-Fi pairing with the phone",
     )
+    _json(wifi)
     return parser
 
 
@@ -444,10 +519,18 @@ def _confirm(question: str) -> bool:
 
 
 def _no_terminal(what: str) -> int:
-    say(
-        "Nothing was written and the phone was not contacted: there is no terminal to "
-        f"ask in. Run {what} in a terminal, or add --yes."
-    )
+    if _out.json:
+        message = (
+            f"nothing was written and the phone was not contacted: {what} --json needs --yes, "
+            "which only the user may give after seeing the changes"
+        )
+    else:
+        message = (
+            "nothing was written and the phone was not contacted: there is no terminal to "
+            f"ask in. Run {what} in a terminal, or add --yes."
+        )
+    say(message[0].upper() + message[1:])
+    failed("confirmation_needed", message)
     return EXIT_NOT_CONFIRMED
 
 
@@ -497,11 +580,11 @@ async def _pull(args: argparse.Namespace, opener: Opener) -> int:
     if layout.exists() and not args.overwrite:
         reason = _unpushed_edits(layout, data)
         if reason:
-            warn(
-                f"error: {layout} already exists and {reason}. Pull into another file "
-                f"(ios-homescreen pull new.toml), or add --overwrite to replace it."
+            raise Refused(
+                f"{layout} already exists and {reason}. Pull into another file "
+                f"(ios-homescreen pull new.toml), or add --overwrite to replace it.",
+                code="unpushed_edits",
             )
-            return EXIT_ERROR
     device = await opener(_transport(args))
     try:
         say(f"Connected: {_describe(device.info)}")
@@ -517,6 +600,15 @@ async def _pull(args: argparse.Namespace, opener: Opener) -> int:
     tmp.replace(layout)
     say(f"Wrote {layout}: {overview(snapshot['state'], snapshot['apps'])}.")
     say(f"Snapshot: {saved}")
+    counts = layout_counts(snapshot["state"])
+    report(
+        layout=str(layout),
+        pull=saved.name,
+        device=snapshot.get("device", {}),
+        dock=counts["dock"],
+        pages=counts["pages"],
+        library=len(library_apps(snapshot["state"], snapshot["apps"])),
+    )
     check, push = _command("check", layout), _command("push", layout)
     width = max(len(check), len(push))
     say(f"Next: edit {layout}, then run")
@@ -532,6 +624,7 @@ def _plan(args: argparse.Namespace) -> tuple[Plan, dict[str, Any], Path, bool]:
     """Plan the layout file against its pull: ``(plan, snapshot, path, named_by_file)``."""
     document = api.load_layout(args.layout)
     path, named = find_pull(document, _data_dir(args))
+    report(layout=str(args.layout), pull=path.name, pull_named_by_file=named)
     if not named:
         warn(f"{args.layout} names no pull; comparing it with the newest one, {path.name}.")
     read = api.load_pull(path)
@@ -543,6 +636,13 @@ def _check(args: argparse.Namespace) -> int:
     after = {"state": plan.payload, "apps": read.get("apps", {})}
     library = len(library_apps(after["state"], after["apps"]))
     source = f"the pull from {pull_source(read)}"
+    report(
+        valid=True,
+        unchanged=plan.unchanged,
+        changes=list(plan.change_list),
+        summary=change_summary(plan.change_list),
+        library=library,
+    )
     if plan.unchanged:
         say(f"{args.layout} is valid and matches {source}: push would change nothing.")
         return EXIT_OK
@@ -579,6 +679,7 @@ async def _push(
         current = await _timed(device.read_state(), timing.read_timeout, "Reading the layout")
         if same_layout(current, plan.payload):
             say("The iPhone already shows this layout. Nothing was written.")
+            report(status="unchanged", changes=[])
             return EXIT_OK
         if fingerprint(current) != fingerprint(read["state"]):
             if not args.force:
@@ -586,10 +687,13 @@ async def _push(
             say("The iPhone changed since the pull; writing anyway (--force).")
         say()
         say(f"Changes to {info.get('name') or 'the iPhone'}:")
-        _show_changes(api.changes_between({"state": current, "apps": read["apps"]}, plan.payload))
+        changes = api.changes_between({"state": current, "apps": read["apps"]}, plan.payload)
+        report(changes=changes, summary=change_summary(changes))
+        _show_changes(changes)
         say()
         if not args.yes and not _confirm("Write this layout? A backup is saved first."):
             say("Nothing was written.")
+            failed("not_confirmed", "the write was not confirmed; nothing was written")
             return EXIT_NOT_CONFIRMED
         result = await api.push(
             device,
@@ -599,11 +703,32 @@ async def _push(
             timing=timing,
             on_event=_show,
         )
+        _report_result(result)
         if result.ok:
             await _record_push(args, device, named)
     finally:
         await device.close()
     return _EXIT_FOR_STATUS[result.status]
+
+
+def _report_result(result: Any) -> None:
+    report(
+        status=result.status,
+        backup=str(result.backup),
+        write_unconfirmed=result.write_unconfirmed,
+    )
+    if result.status == ROLLED_BACK:
+        failed(
+            "rolled_back",
+            "the phone did not show the new layout in time; the backup was written back and "
+            "verified",
+        )
+    elif result.status == ROLLBACK_FAILED:
+        failed(
+            "rollback_failed",
+            f"the backup could not be verified after writing it back; it is kept at "
+            f"{result.backup}",
+        )
 
 
 async def _record_push(args: argparse.Namespace, device: Any, named: bool) -> None:
@@ -612,9 +737,12 @@ async def _record_push(args: argparse.Namespace, device: Any, named: bool) -> No
         snapshot = await api.read_device(device)
     except Exception as exc:
         say(f"Reading the phone afterwards failed ({exc}). Pull again before the next push.")
+        report(new_pull=None, layout_updated=False)
         return
     saved = api.save_pull(snapshot, _data_dir(args))
-    if named and point_layout_at(args.layout, saved.name):
+    updated = named and point_layout_at(args.layout, saved.name)
+    report(new_pull=saved.name, layout_updated=updated)
+    if updated:
         say(f"{args.layout} is up to date with the phone again ({saved.name}).")
     else:
         say(f"Saved the phone's new layout as the newest pull: {saved.name}.")
@@ -625,8 +753,10 @@ def _run_push(args: argparse.Namespace, opener: Opener) -> int:
     plan, read, path, named = _plan(args)
     if plan.unchanged and not args.force:
         say(f"{args.layout} matches its pull ({path.name}): nothing to push.")
+        report(status="unchanged", changes=[])
         return EXIT_OK
-    if not args.yes and not _interactive():
+    if not args.yes and (_out.json or not _interactive()):
+        report(changes=list(plan.change_list), summary=change_summary(plan.change_list))
         say(f"{args.layout} is valid. Changes compared with its pull:")
         say()
         _show_changes(list(plan.change_list))
@@ -652,6 +782,7 @@ def _backup_line(backup: Backup) -> tuple[str, str, str, str]:
 def _backups(args: argparse.Namespace) -> int:
     directory = _backup_dir(args)
     found = list_backups(directory)
+    report(directory=str(directory), backups=[backup.to_dict() for backup in found])
     if not found:
         say(f"No backups in {directory} yet. push, restore and the editor save one before writing.")
         return EXIT_OK
@@ -682,7 +813,7 @@ async def _restore(
         say(f"Connected: {_describe(info)}")
         wanted, actual = recorded.get("udid"), info.get("udid")
         if wanted and actual and wanted != actual and not args.force:
-            raise WorkflowError(
+            raise Refused(
                 f"{path.name} was made on another iPhone ({_describe(recorded)}), so nothing "
                 "was written. Add --force to restore it to this one anyway.",
                 code="other_device",
@@ -690,18 +821,23 @@ async def _restore(
         current = await _timed(device.read_state(), timing.read_timeout, "Reading the layout")
         if same_layout(current, target):
             say("The iPhone already shows this layout. Nothing was written.")
+            report(status="unchanged", changes=[])
             return EXIT_OK
         apps = await _timed(device.installed_apps(), timing.read_timeout, "Reading the apps")
         say()
         say(f"Changes to {info.get('name') or 'the iPhone'}:")
-        _show_changes(api.changes_between({"state": current, "apps": apps}, target))
+        changes = api.changes_between({"state": current, "apps": apps}, target)
+        report(changes=changes, summary=change_summary(changes))
+        _show_changes(changes)
         say()
         if not args.yes and not _confirm("Restore this backup? The current layout is saved first."):
             say("Nothing was written.")
+            failed("not_confirmed", "the restore was not confirmed; nothing was written")
             return EXIT_NOT_CONFIRMED
         result = await api.restore(
             device, target, backup_dir=_backup_dir(args), timing=timing, on_event=_show
         )
+        _report_result(result)
     finally:
         await device.close()
     return _EXIT_FOR_STATUS[result.status]
@@ -714,9 +850,55 @@ def _run_restore(args: argparse.Namespace, opener: Opener) -> int:
     recorded = device_of(path)
     made_on = f", {recorded['name']}" if recorded.get("name") else ""
     say(f"Backup: {path.name}{made_on}")
-    if not args.yes and not _interactive():
+    report(restoring=path.name, made_on=recorded)
+    if not args.yes and (_out.json or not _interactive()):
         return _no_terminal("restore")
     return asyncio.run(_restore(args, opener, path, target))
+
+
+# --------------------------------------------------------------------------- apps
+
+
+def _place(where: Mapping[str, Any]) -> str:
+    if where["section"] == "library":
+        return "App Library"
+    text = "dock" if where["section"] == "dock" else f"page {where['page']}"
+    text += f", position {where['index']}"
+    if where.get("folder") is not None:
+        text += f', folder "{where["folder"]}"'
+        if where.get("folder_page", 1) > 1:
+            text += f" page {where['folder_page']}"
+        text += f" (position {where['folder_index']})"
+    return text
+
+
+def _apps(args: argparse.Namespace) -> int:
+    path = newest_pull(_data_dir(args))
+    read = api.load_pull(path)
+    found = app_places(read)
+    query = (args.query or "").casefold()
+    if query:
+        found = [a for a in found if query in a["name"].casefold() or query in a["id"].casefold()]
+    report(pull=path.name, pulled_from=pull_source(read), apps=found)
+    say(f"Apps on {pull_source(read)} ({path.name}):")
+    say()
+    if not found:
+        say(f"  No app matches {args.query!r}." if query else "  No apps.")
+        return EXIT_OK
+    name_width = min(28, max(len(a["name"]) for a in found))
+    id_width = min(44, max(len(a["id"]) for a in found))
+    for app in found:
+        say(
+            f"  {app['name'][:name_width].ljust(name_width)}  {app['id'].ljust(id_width)}  "
+            f"{_place(app['where'])}"
+        )
+    shown = sum(1 for a in found if a["where"]["section"] != "library")
+    say()
+    say(
+        f"{len(found)} apps: {shown} on the home screen, {len(found) - shown} only in the "
+        "App Library."
+    )
+    return EXIT_OK
 
 
 # --------------------------------------------------------------------------- wifi and editor
@@ -724,8 +906,7 @@ def _run_restore(args: argparse.Namespace, opener: Opener) -> int:
 
 async def _wifi(args: argparse.Namespace, opener: Opener, backend: Any) -> int:
     if args.forget and args.action != "off":
-        warn("error: --forget only goes with off")
-        return EXIT_NOT_CONFIRMED
+        raise Refused("--forget only goes with off", code="usage", exit_code=EXIT_NOT_CONFIRMED)
     transport = _transport(args)
     device = await opener(transport)
     try:
@@ -747,6 +928,7 @@ async def _wifi(args: argparse.Namespace, opener: Opener, backend: Any) -> int:
     finally:
         await device.close()
     info = status.device
+    report(action=args.action, **{**status.to_dict(), "device": device_details(info)})
     say(f"Device: {_describe(info)}")
     if info.get("udid"):
         say(f"UDID: {info['udid']}")
@@ -806,6 +988,8 @@ def _run(args: argparse.Namespace, opener: Opener, backend: Any = None) -> int:
         return _backups(args)
     if args.command == "restore":
         return _run_restore(args, opener)
+    if args.command == "apps":
+        return _apps(args)
     if args.command == "wifi":
         return asyncio.run(_wifi(args, opener, backend))
     raise AssertionError(f"unhandled command {args.command!r}")
@@ -820,25 +1004,55 @@ def main(
     """Entry point. ``open_device`` replaces the real connection and ``wifi_backend`` the
     Wi-Fi pairing helpers (tests use fakes)."""
     args = build_parser().parse_args(argv)
+    _out.json = bool(getattr(args, "json", False))
+    _out.data = {}
     try:
-        return _run(args, open_device or _default_opener, wifi_backend)
+        code = _run(args, open_device or _default_opener, wifi_backend)
+    except Refused as exc:
+        code = exc.exit_code
+        _error(exc, exc.code)
+    except api.LayoutError as exc:
+        code = EXIT_ERROR
+        _error(exc, "layout_invalid", issues=exc.to_dict()["issues"])
     except (
         api.StateError,
-        api.LayoutError,
         api.WorkflowError,
         api.DeviceError,
         api.TransportError,
         OSError,
         TimeoutError,
     ) as exc:
-        warn(f"error: {exc}")
-        return EXIT_ERROR
+        code = EXIT_ERROR
+        _error(exc, _error_code(exc))
     except KeyboardInterrupt:
-        warn(
-            "\ninterrupted. If a write was running, look at the phone; "
+        code = EXIT_INTERRUPTED
+        message = (
+            "interrupted. If a write was running, look at the phone; "
             "'ios-homescreen restore latest' writes back the backup made before it."
         )
-        return EXIT_INTERRUPTED
+        warn("\n" + message)
+        failed("interrupted", message)
+    if _out.json:
+        result = {"ok": code == EXIT_OK, "command": args.command, "exit_code": code}
+        print(json.dumps({**result, **_out.data}, ensure_ascii=False, default=str), flush=True)
+    return code
+
+
+def _error_code(exc: BaseException) -> str:
+    code = getattr(exc, "code", None)
+    if isinstance(code, str) and code:
+        return code
+    if isinstance(exc, api.StateError):
+        return "invalid_file"
+    if isinstance(exc, TimeoutError):
+        return "timeout"
+    return "os_error"
+
+
+def _error(exc: BaseException, code: str, **extra: Any) -> None:
+    if not _out.json:
+        warn(f"error: {exc}")
+    failed(code, str(exc), **extra)
 
 
 if __name__ == "__main__":

@@ -44,6 +44,16 @@ To try the browser editor without a phone: `uv run ios-homescreen editor --demo`
 
 The core never prints. If you need to report progress, emit an `Event` with a stable `code`.
 
+## For AI agents
+
+`docs/agent-guide.md` is written for AI coding agents that set up and use the tool for
+someone; `llms.txt` points to it, and `skills/ios-homescreen/SKILL.md` is the same workflow
+as a Claude Code skill that defers to the guide. When a command, flag, JSON field or error
+code changes, update the guide (and the skill if it names it). `tests/test_docs.py` checks
+that every command and flag they mention exists, that the error codes in the guide are
+real, and that the skill's frontmatter is valid. The `--json` output is a public
+interface: add fields rather than rename them.
+
 ## The browser editor
 
 The page is plain JavaScript modules in `src/ios_homescreen/ui/static/js`, written with

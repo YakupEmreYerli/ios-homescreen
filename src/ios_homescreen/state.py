@@ -31,7 +31,11 @@ HOME_SCREEN_APP_TYPES = frozenset({"User", "System"})
 
 
 class StateError(ValueError):
-    """Raised when icon state cannot be handled safely."""
+    """Raised when icon state, or a file holding it, cannot be used. ``code`` says why."""
+
+    def __init__(self, message: str, *, code: str = "invalid_file") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 State = list[list[Any]] | dict[str, Any]

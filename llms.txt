@@ -1,0 +1,16 @@
+# ios-homescreen
+
+> Pull an iPhone home screen into a TOML file, edit it, and push it back safely from Linux, over USB or Wi-Fi. Every write is confirmed by the user, backed up, verified and rolled back on failure.
+
+AI agents helping someone rearrange their home screen: read the agent guide first. It covers setup, the layout file rules, the safe edit workflow (check, show the changes, wait for the user's yes, push), JSON output and error codes.
+
+## Docs
+
+- [Agent guide](https://raw.githubusercontent.com/YakupEmreYerli/ios-homescreen/main/docs/agent-guide.md): everything an agent needs, in one page
+- [README](https://raw.githubusercontent.com/YakupEmreYerli/ios-homescreen/main/README.md): what the tool does, install, commands and the safety model
+- [Example layout](https://raw.githubusercontent.com/YakupEmreYerli/ios-homescreen/main/examples/layout.toml): a complete layout file
+
+## Optional
+
+- [Claude Code skill](https://raw.githubusercontent.com/YakupEmreYerli/ios-homescreen/main/skills/ios-homescreen/SKILL.md): the same workflow as a skill
+- [Contributing](https://raw.githubusercontent.com/YakupEmreYerli/ios-homescreen/main/CONTRIBUTING.md): code layout and the device pitfalls behind the design
