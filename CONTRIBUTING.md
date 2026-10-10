@@ -69,8 +69,59 @@ are, and the wheel ships them as package data. Edit a file, reload the page.
   (the import map is allowed by its hash, computed at start), no `eval`.
 - Keep the look plain: flat colours, no gradients, blur or text shadows, and motion only
   where it answers the user (drag, reflow, folder open, progress). `test_the_editor_stays_flat`
-  checks the first part.
+  checks the first part. Translucent flat fills are fine where the wallpaper should show
+  through (dock, folders).
+- The wallpaper comes from SpringBoard's `getHomeScreenWallpaperPNGData` after each read
+  and is cached per device next to the icons; without it the screen keeps the flat colour.
+  iOS 27 drops that request over Wi-Fi (ConnectionTerminatedError on 27.0.1), so the call
+  has a short time limit and a phone that sent nothing is not asked again in that session.
+  Do not use `getWallpaperPreviewImage` instead: it returns a screenshot of the home screen,
+  icons and badges included.
+  Widgets are drawn from what the layout says about them (size, stack, app, widget
+  identifier). The phone sends no picture of a widget's content, so the editor draws none.
 - Check UI changes in a real browser, in demo mode, and at a narrow window width.
+
+## Screenshots for the README
+
+`docs/assets/ui.png` should show a real phone's icons and widgets, but not the rest of
+that phone. `editor --showcase LAYOUT` does that: it reads the phone, shows LAYOUT instead
+of the phone's own layout, and never writes. The page looks like the normal editor, so the
+terminal says when it starts in this mode; Apply only opens a notice, Restore is refused
+and backups are not listed (the server refuses writes, and the device is wrapped so a write
+fails anyway). The phone is called by its model instead of its name, and the App Library
+lists only the apps in the file's optional `[showcase]` table:
+
+```toml
+[showcase]
+library = ["Translate", "Stocks", "com.apple.measure"]   # names or bundle ids
+wallpaper = "wallpaper.png"   # PNG or JPEG, relative to this file
+before = "before.toml"        # the change list is computed from this layout
+
+[dock]
+items = ["Phone", "Safari", "Messages", "Camera"]
+
+[[pages]]
+items = [
+  { type = "widget", id = "..." },   # widget ids from `ios-homescreen pull`
+  "Calendar", "Photos", "Mail", "Maps",
+  { type = "folder", name = "Utilities", items = ["Calculator", "Voice Memos"] },
+]
+```
+
+- `wallpaper` is the phone background. iOS 27 does not send its wallpaper over Wi-Fi, so
+  without this key the screen is a plain colour.
+- `before` is a second layout file. The editor counts the changes from it, so the change
+  list is filled without dragging anything; it may hold other apps and fewer or more
+  widgets than the shown layout.
+- A showcase layout may leave out widgets, web clips and web apps.
+
+```bash
+uv run ios-homescreen editor --showcase showcase.toml          # add --wifi for Wi-Fi
+uv run ios-homescreen editor --demo --showcase showcase.toml   # the same on the demo phone
+```
+
+Read from phone loads the files again, so they can be adjusted while the editor runs. Take
+the screenshot at 1600 x 1000 and run `magick mogrify -strip` on it.
 
 ## Tests
 
@@ -114,9 +165,12 @@ alternative on a device.
   bundle id (two widgets from one app share it), and Safari web apps carry Safari's bundle id.
   Keying by `bundleIdentifier` makes them collide. A web app does not count as Safari when
   computing `ignored`.
-- Never call pymobiledevice3's `set_icon_state`: it waits forever for a reply SpringBoard
-  usually does not send. `device.py` sends the plist on the raw service connection with a
-  time limit and waits only briefly for a reply.
+- Never call pymobiledevice3's `set_icon_state` or `reload_icon_state`. The second reads the
+  layout and writes it back in the list form, which is the accident above; the first waits
+  forever for a reply SpringBoard usually does not send. The SpringBoard service that
+  `device.py` creates refuses both, and a test fails if the code calls them. `device.py`
+  sends the plist on the raw service connection with a time limit and waits only briefly
+  for a reply.
 - A reply proves nothing. Success is a re-read on a new service connection that matches the
   plan. Without that proof, the workflow writes the backup back.
 - Store reads, backups and plans as binary plist. The state has `datetime` and `bytes` values

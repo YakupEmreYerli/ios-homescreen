@@ -8,7 +8,8 @@ send requests to it, and DNS rebinding can make a foreign page look same-origin.
   and ``SameSite=Strict`` and the address bar loses the token after one redirect;
 * the ``Host`` header must be ``127.0.0.1:PORT`` or ``localhost:PORT`` (DNS rebinding);
 * ``Sec-Fetch-Site`` must be ``same-origin`` or ``none`` when the browser sends it;
-* every API call except icon images also needs the token in an ``X-IHS-Token`` header,
+* every API call except images (icons, wallpaper) also needs the token in an
+  ``X-IHS-Token`` header,
   which only the served page knows (cross-origin pages cannot read it or set it without
   a CORS preflight that is never approved);
 * requests that change something must carry an ``Origin`` equal to the server's own;
@@ -42,6 +43,11 @@ color:#e6eaf2;font:16px/1.5 system-ui,sans-serif}}main{{max-width:30rem;padding:
 h1{{font-size:1.25rem}}code{{background:#1a2130;padding:.1rem .35rem;border-radius:.3rem}}
 </style></head><body><main><h1>{title}</h1><p>{text}</p></main></body></html>
 """
+
+
+def _is_image(path: str) -> bool:
+    """Images are loaded by ``<img>``, which cannot send the token header."""
+    return path.startswith("/api/icons/") or path == "/api/wallpaper"
 
 
 def cookie_name(port: int) -> str:
@@ -120,7 +126,7 @@ class Guard:
             else:
                 await self._locked(send)
             return
-        is_image = path.startswith("/api/icons/") and method in SAFE_METHODS
+        is_image = _is_image(path) and method in SAFE_METHODS
         if (
             path.startswith("/api/")
             and not is_image
@@ -149,7 +155,7 @@ class Guard:
             (b"cross-origin-resource-policy", b"same-origin"),
             (b"content-security-policy", self.csp.encode()),
         ]
-        if path.startswith("/api/") and not path.startswith("/api/icons/"):
+        if path.startswith("/api/") and not _is_image(path):
             found.append((b"cache-control", b"no-store"))
         return found
 

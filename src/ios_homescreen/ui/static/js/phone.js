@@ -3,13 +3,14 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import * as actions from "./actions.js";
+import { wallpaperUrl } from "./api.js";
 import { startPress } from "./drag.js";
 import { html } from "./html.js";
 import * as L from "./layout.js";
 import { findFolder } from "./ops.js";
 import { displayed } from "./preview.js";
 import { getState, setState, useStore } from "./store.js";
-import { Badge, Visual } from "./visuals.js";
+import { Badge, Visual, widgetLabel } from "./visuals.js";
 
 const BEZEL = 13;
 const FRAME_W = L.SCREEN_W + BEZEL * 2;
@@ -44,7 +45,8 @@ function HomeItem({ item, box, where, inDock = false, merge = false }) {
       setState({ menu: { x: rect.right, y: rect.top, item } });
     }
   };
-  const title = item.type === "widget" ? `${item.name} widget` : item.name;
+  const label = item.type === "widget" ? widgetLabel(item) : item.name;
+  const title = item.type === "widget" ? `${label} widget` : item.name;
   return html`<div
     class=${`item item-${item.type}${flash ? " is-flash" : ""}${merge ? " is-merge" : ""}${inDock ? " in-dock" : ""}`}
     style=${style}
@@ -65,7 +67,7 @@ function HomeItem({ item, box, where, inDock = false, merge = false }) {
       <${Visual} item=${item} />
       <${Badge} item=${item} />
     </div>
-    ${inDock ? null : html`<div class="label">${item.name}</div>`}
+    ${inDock ? null : html`<div class="label">${label}</div>`}
     <button
       class="minus"
       tabindex="-1"
@@ -208,6 +210,24 @@ const statusIcons = html`<div class="status-icons" aria-hidden="true">
     <rect x="2" y="2" width="20" height="9" rx="2.2" /><path d="M25 4.5v4a2 2 0 0 0 0-4z" opacity=".45" />
   </svg>
 </div>`;
+
+// The phone's own wallpaper when it sent one; the flat dusk colour until then, or if not.
+function Wallpaper() {
+  const version = getState().wallpaper;
+  const [failed, setFailed] = useState(null);
+  const shown = version && failed !== version;
+  return html`<div class=${`wallpaper${shown ? " has-image" : ""}`}>
+    ${shown
+      ? html`<img
+          class="wallpaper-img"
+          src=${wallpaperUrl(version)}
+          alt=""
+          draggable="false"
+          onError=${() => setFailed(version)}
+        />`
+      : null}
+  </div>`;
+}
 
 function Skeleton() {
   return html`<div class="skeleton">
@@ -354,8 +374,8 @@ export function Phone() {
       <div class="phone" style=${{ transform: `scale(${scale})` }}>
         <span class="side-btn side-action"></span><span class="side-btn side-up"></span>
         <span class="side-btn side-down"></span><span class="side-btn side-power"></span>
-        <div class="screen" data-zone="screen">
-          <div class="wallpaper"></div>
+        <div class=${`screen${state.openFolder ? " has-folder" : ""}`} data-zone="screen">
+          <${Wallpaper} />
           <div class="status-bar">
             <span class="clock">9:41</span>
             <span class="island"></span>

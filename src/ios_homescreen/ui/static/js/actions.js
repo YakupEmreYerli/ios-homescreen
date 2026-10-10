@@ -29,6 +29,7 @@ initState({
   toasts: [],
   search: "",
   icons: { available: new Set(), pending: false },
+  wallpaper: null,
   flash: null,
   drawer: null,
 });
@@ -162,7 +163,8 @@ function adopt(server, { reset }) {
   const view = server.read?.view || null;
   const patch = { server, baseline: view, apps: server.read?.apps || [], boot: "ready" };
   if (view && (reset || !state.draft)) {
-    const draft = ops.fromView(view);
+    // Showcase mode can start from another layout than the one changes are counted from.
+    const draft = ops.fromView(server.read.draft || view);
     Object.assign(patch, {
       draft,
       removed: [],
@@ -178,7 +180,10 @@ function adopt(server, { reset }) {
 }
 
 function adoptIcons(icons) {
-  setState({ icons: { available: new Set(icons.available), pending: icons.pending } });
+  setState({
+    icons: { available: new Set(icons.available), pending: icons.pending },
+    wallpaper: icons.wallpaper || null,
+  });
   if (icons.pending) setTimeout(pollIcons, 1000);
 }
 
@@ -256,6 +261,10 @@ async function runRead() {
 export function openApply() {
   const state = getState();
   if (!state.check.ok || !state.check.dirty || state.check.pending) return;
+  if (state.server?.showcase) {
+    setState({ dialog: { kind: "showcase" }, drawer: null });
+    return;
+  }
   setState({ dialog: { kind: "apply" }, drawer: null });
 }
 

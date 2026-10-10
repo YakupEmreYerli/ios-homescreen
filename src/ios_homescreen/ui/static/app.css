@@ -902,7 +902,33 @@ svg {
 .wallpaper {
   position: absolute;
   inset: 0;
+  overflow: hidden;
   background: var(--dusk);
+}
+
+.wallpaper-img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* A flat dim keeps white labels readable on bright wallpapers; an open folder dims more. */
+.wallpaper.has-image::after,
+.screen.has-folder .wallpaper::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.screen.has-folder .wallpaper::after {
+  background: rgba(0, 0, 0, 0.36);
 }
 
 .status-bar {
@@ -968,7 +994,7 @@ svg {
 }
 
 .home.is-dimmed {
-  opacity: 0.14;
+  opacity: 0.1;
   pointer-events: none;
 }
 
@@ -976,6 +1002,12 @@ svg {
 .home.is-dimmed .label,
 .home.is-dimmed .widget-text {
   visibility: hidden;
+}
+
+/* White would still show through at that opacity; fade widgets like the icons. */
+.home.is-dimmed .widget-tile,
+.home.is-dimmed .widget-behind {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .page-grid,
@@ -1076,7 +1108,7 @@ svg {
   place-items: center;
   background: var(--graphite);
   color: #fff;
-  box-shadow: 0 0 0 2px var(--dusk);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9);
 }
 
 .badge svg {
@@ -1091,8 +1123,9 @@ svg {
   border: 1.5px dashed rgba(255, 255, 255, 0.55);
 }
 
-.item-widget .slot {
-  border-radius: 24px;
+.item-widget .slot,
+.item-widget .tile {
+  border-radius: 22px;
 }
 
 .item.is-merge .tile {
@@ -1151,7 +1184,7 @@ svg {
   height: 100%;
   border-radius: 22.5%;
   padding: 8px;
-  background: #5e6b82;
+  background: rgba(255, 255, 255, 0.26);
 }
 
 .folder-grid {
@@ -1215,7 +1248,7 @@ svg {
 .folder-panel {
   position: absolute;
   border-radius: 38px;
-  background: #5e6b82;
+  background: rgba(94, 107, 130, 0.94);
   animation: open 0.18s ease-out;
 }
 
@@ -1233,38 +1266,87 @@ svg {
   height: 22px;
 }
 
-/* widgets */
+/* widgets: the real size and corners, white like iOS widgets in light mode */
+
+.widget {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
 
 .widget-tile {
+  position: relative;
   width: 100%;
   height: 100%;
   border-radius: 22px;
-  padding: 16px;
+  padding: 14px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  background: #5e6b82;
-  color: #fff;
-  font-family: var(--font);
   overflow: hidden;
+  background: #fff;
+  color: #1d2026;
+  font-family: var(--ios-font);
 }
 
-.widget-icon {
-  width: 34px;
-  height: 34px;
+/* The cards behind the top one: a stack holds more than one widget. */
+.widget-behind {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  top: -7px;
+  height: 24px;
+  border-radius: 14px 14px 0 0;
+  background: rgba(255, 255, 255, 0.5);
 }
 
-.widget-icon .icon-img,
+.widget-icon,
+.widget-member {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  flex: none;
+}
+
+/* A hairline edge, so white icons do not melt into the white widget. */
+.widget-icon::after,
+.widget-member::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 22.5%;
+  box-shadow: inset 0 0 0 1px rgba(29, 32, 38, 0.1);
+  pointer-events: none;
+}
+
 .widget-icon .icon-fallback {
-  border-radius: 8px;
-}
-
-.widget-icon .icon-fallback {
-  font-size: 15px;
-}
-
-.widget-name {
   font-size: 17px;
+}
+
+.widget-members {
+  position: absolute;
+  top: 16px;
+  right: 24px;
+  display: flex;
+  gap: 6px;
+}
+
+.widget-member {
+  width: 24px;
+  height: 24px;
+}
+
+.widget-member .icon-fallback {
+  font-size: 11px;
+}
+
+.widget-text {
+  min-width: 0;
+  padding-right: 8px;
+}
+
+.widget-title {
+  font-size: 16px;
   font-weight: 600;
   line-height: 1.2;
   white-space: nowrap;
@@ -1272,36 +1354,75 @@ svg {
   text-overflow: ellipsis;
 }
 
-.widget-kind {
+.widget-note {
   margin-top: 2px;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.78);
+  font-size: 13px;
+  line-height: 1.25;
+  color: #6b717c;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.widget-medium .widget-name {
-  font-size: 20px;
+.widget-dots {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transform: translateY(-50%);
 }
 
-.widget-large {
-  padding: 22px;
+.widget-dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(29, 32, 38, 0.2);
+}
+
+.widget-dots span.is-current {
+  background: rgba(29, 32, 38, 0.72);
+}
+
+.widget-medium .widget-tile {
+  padding: 16px 18px;
+}
+
+.widget-medium .widget-icon {
+  width: 44px;
+  height: 44px;
+}
+
+.widget-medium .widget-title {
+  font-size: 18px;
+}
+
+.widget-large .widget-tile {
+  padding: 20px;
 }
 
 .widget-large .widget-icon {
-  width: 52px;
-  height: 52px;
+  width: 60px;
+  height: 60px;
 }
 
-.widget-large .widget-icon .icon-img,
-.widget-large .widget-icon .icon-fallback {
-  border-radius: 12px;
+.widget-large .widget-members {
+  top: 20px;
+  right: 26px;
 }
 
-.widget-large .widget-name {
-  font-size: 26px;
+.widget-large .widget-member {
+  width: 30px;
+  height: 30px;
 }
 
-.widget-large .widget-kind {
-  font-size: 14px;
+.widget-large .widget-title {
+  font-size: 22px;
+}
+
+.widget-large .widget-note {
+  font-size: 15px;
 }
 
 /* dock */
@@ -1313,7 +1434,7 @@ svg {
   top: 726px;
   height: 94px;
   border-radius: 34px;
-  background: #56627a;
+  background: rgba(255, 255, 255, 0.2);
 }
 
 .dock.is-blocked .dock-glass {

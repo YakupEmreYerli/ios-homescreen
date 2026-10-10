@@ -40,8 +40,8 @@ If you would rather drag icons around, `ios-homescreen editor` does the same in 
 - Keeps pull snapshots and backups in `~/.local/share/ios-homescreen`; only the layout file
   goes where you say.
 - Has a browser editor (`ios-homescreen editor`): drag apps, folders and widgets on a
-  picture of your home screen, see every change before it is written, and apply it with
-  the same safety steps. A demo mode needs no phone.
+  picture of your home screen with its own icons, see every change before it is written,
+  and apply it with the same safety steps. A demo mode needs no phone.
 - Can be used from Python: the CLI is a thin layer over `ios_homescreen.api`.
 
 ## Requirements
@@ -228,15 +228,20 @@ Changes compared with the pull from iPhone (iPhone 15, iOS 27.0) on 2026-10-10 1
 
 ## Browser editor
 
-![The browser editor in demo mode](docs/assets/ui.png)
+![The browser editor connected to an iPhone 15 over Wi-Fi (showcase layout)](docs/assets/ui.png)
 
-`ios-homescreen editor` reads the phone and opens an editor in your browser. Drag apps,
-folders and widgets around, between pages and into the dock. Drop an app on another one to
+`ios-homescreen editor` reads the phone and opens an editor in your browser, with the
+phone's app icons and, where the phone sends it, its wallpaper. Drag apps, folders and widgets around, between pages and
+into the dock. Drop an app on another one to
 make a folder; click a folder to open it, rename it, and drag apps in or out. The App
 Library on the left lists the apps that are installed but not on the home screen: drag
 them in, or drag apps there to take them off the home screen. The right side lists every
 change compared with the last read and checks the layout with the same rules as `check`
 while you edit.
+
+Widgets show at their real size with their app's icon and name, and a stack shows how
+many widgets it holds. The phone does not send what a widget displays, so the editor does
+not make that up.
 
 Apply asks for confirmation, then runs the same steps as `push`: backup, write, read back,
 roll back if it does not match. The progress and the result show in the page. Backups lists
@@ -260,7 +265,7 @@ The connection and write options work as for `push`. `--yes` is not needed: the 
 The editor listens on 127.0.0.1 only. The address it prints contains a key that changes on
 every start; the page trades it for a cookie, and every request has to carry the key and come
 from the page itself, so other websites open in the same browser cannot use the editor or
-see your icons and backups. Removing a widget needs its own confirmation, like
+see your icons, wallpaper and backups. Removing a widget needs its own confirmation, like
 `--allow-removal`. Ctrl+Z and Ctrl+Shift+Z undo and redo.
 
 ## How the safety model works
@@ -386,6 +391,10 @@ app icons as PNG bytes.
   widget, back to their default choice: SpringBoard drops that choice on a write (seen on
   iOS 27). The check after writing ignores it for that reason.
 - Wi-Fi needs iOS 17 or later.
+- The browser editor shows the phone's wallpaper only when SpringBoard sends it. On iOS 27
+  over Wi-Fi the phone closes that request (seen on iOS 27.0.1), so the editor uses a plain
+  background there. The only other way to get an image is a screenshot of the home screen
+  with its icons, which cannot serve as a background.
 - Empty pages are not written; SpringBoard does not keep them.
 - Page capacity uses the iPhone grid (6 by 4). iPads have not been tested.
 - The layout format is Apple's and undocumented, and an iOS update can change it. Pull again

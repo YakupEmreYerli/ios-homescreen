@@ -173,11 +173,13 @@ function BackupsDialog() {
   const backups = state.dialog.backups;
   const [asking, setAsking] = useState(null);
   const running = state.job?.state === "running";
+  const showcase = Boolean(state.server?.showcase);
   return html`<${Modal} title="Backups" wide>
     <h3 class="modal-title">Backups</h3>
     <p class="modal-text">A backup is saved before every write. Restoring one writes it to the phone with the same checks as Apply (and backs up the current layout first).</p>
     ${backups === null ? html`<div class="empty"><span class="spinner small"></span> Loading...</div>` : null}
-    ${backups && !backups.length ? html`<div class="empty">No backups yet. One is made before every Apply.</div>` : null}
+    ${showcase ? html`<div class="empty">Showcase mode does not list backups and cannot restore them.</div>` : null}
+    ${backups && !backups.length && !showcase ? html`<div class="empty">No backups yet. One is made before every Apply.</div>` : null}
     ${backups?.length
       ? html`<ul class="backup-list">
           ${backups.map(
@@ -248,6 +250,15 @@ function ImportIssues() {
   <//>`;
 }
 
+// Showcase mode looks like the normal editor, so Apply explains instead of writing.
+function ShowcaseNotice() {
+  return html`<${Modal} title="Showcase mode">
+    <h3 class="modal-title">Nothing is written in showcase mode</h3>
+    <p class="modal-text">This editor was started with <code>--showcase</code> to show a layout file on this iPhone. It does not write to the phone. Start it without <code>--showcase</code> to apply changes.</p>
+    <div class="modal-actions"><button class="btn btn-primary" data-autofocus onClick=${close}>OK</button></div>
+  <//>`;
+}
+
 function ErrorDialog() {
   const { error } = getState().dialog;
   return html`<${Modal} title=${error.title}>
@@ -272,6 +283,7 @@ export function Dialogs() {
   if (kind === "confirm-import") return html`<${ConfirmImport} />`;
   if (kind === "import-issues") return html`<${ImportIssues} />`;
   if (kind === "error") return html`<${ErrorDialog} />`;
+  if (kind === "showcase") return html`<${ShowcaseNotice} />`;
   return null;
 }
 

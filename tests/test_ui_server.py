@@ -666,3 +666,302 @@ def test_usb_failures_are_not_retried(tmp_path):
     with pytest.raises(TransportError):
         asyncio.run(session._connect(lambda event: None))
     assert backend.calls == [("usb", None)]
+
+
+# ------------------------------------------------------------------ wallpaper
+
+
+def settled(api) -> dict:
+    """The icon state once the background fetch after a read is over."""
+    deadline = time.monotonic() + 5
+    while api.get("/api/icons").json()["pending"] and time.monotonic() < deadline:
+        time.sleep(0.02)
+    return api.get("/api/icons").json()
+
+
+def test_the_wallpaper_is_fetched_after_a_read_and_served_like_an_icon(make_api):
+    api = make_api(phone(wallpaper=PNG))
+    assert api.get("/api/state").json()["icons"]["wallpaper"] is None
+
+    api.read()
+    version = settled(api)["wallpaper"]
+
+    assert version
+    assert api.get("/api/state").json()["icons"]["wallpaper"] == version
+    # An <img> sends the cookie but cannot send the token header.
+    response = api.client.get(f"/api/wallpaper?v={version}")
+    assert response.status_code == 200
+    assert response.content == PNG
+    assert response.headers["content-type"] == "image/png"
+    assert "no-store" not in response.headers["cache-control"]
+    again = api.client.get("/api/wallpaper", headers={"if-none-match": response.headers["etag"]})
+    assert again.status_code == 304
+    api.client.cookies.clear()
+    assert api.client.get("/api/wallpaper").status_code == 403
+
+
+@pytest.mark.parametrize("answer", [None, OSError("no wallpaper"), b"not an image", b"<svg/>"])
+def test_without_a_usable_wallpaper_the_flat_colour_stays(make_api, answer):
+    api = make_api(phone(wallpaper=answer))
+    api.read()
+
+    icons = settled(api)
+
+    assert icons["wallpaper"] is None
+    assert api.get("/api/wallpaper").status_code == 404
+    # A failed wallpaper does not stop the icons.
+    assert "com.apple.Maps" in icons["available"]
+
+
+def test_the_wallpaper_is_cached_per_iphone_for_the_next_start(tmp_path):
+    def start(device):
+        async def opener(emit):
+            return device
+
+        settings = Settings(
+            data_dir=tmp_path / "data",
+            backup_dir=tmp_path / "data" / "backups",
+            timing=FAST,
+            cache_root=tmp_path / "cache",
+        )
+        client = TestClient(
+            create_app(Session(settings, opener=opener), token=TOKEN, port=PORT), base_url=ORIGIN
+        )
+        client.__enter__()
+        return client, Api(client)
+
+    client, first = start(phone(wallpaper=PNG))
+    first.read()
+    settled(first)
+    client.__exit__(None, None, None)
+    cached = tmp_path / "cache" / "wallpapers" / "00008120-000A1B2C3D4E5F60.png"
+    assert cached.read_bytes() == PNG
+
+    client, second = start(phone(wallpaper=OSError("not this time")))
+    second.read()
+    try:
+        assert settled(second)["wallpaper"]
+        assert second.client.get("/api/wallpaper").content == PNG
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_the_demo_has_a_plain_wallpaper_of_its_own(make_api):
+    from ios_homescreen.ui.demo import DemoDevice
+
+    api = make_api(DemoDevice(delay=0), demo=True)
+    api.read()
+    settled(api)
+
+    response = api.client.get("/api/wallpaper")
+    assert response.headers["content-type"] == "image/svg+xml"
+    assert response.content.startswith(b"<svg")
+    assert b"Gradient" not in response.content
+    assert b"<image" not in response.content
+
+
+# ------------------------------------------------------------------ showcase
+
+SHOWCASE = f"""
+[showcase]
+library = ["tips", "com.apple.stocks"]
+
+[dock]
+items = ["Phone", "Safari"]
+
+[[pages]]
+items = [
+  {{ type = "widget", id = "{samples.LIGHTS_A}" }},
+  "Calendar",
+  "Maps",
+  {{ type = "folder", name = "Studio", items = ["Notes", "Clock"] }},
+]
+"""
+
+
+@pytest.fixture
+def showcase(tmp_path):
+    """A showcase editor on a fake phone: ``(api, device, layout_file)``."""
+    clients = []
+
+    def build(text=SHOWCASE, device=None):
+        device = device or phone()
+        layout = tmp_path / "showcase.toml"
+        layout.write_text(text)
+
+        async def opener(emit):
+            return device
+
+        settings = Settings(
+            data_dir=tmp_path / "data",
+            backup_dir=tmp_path / "data" / "backups",
+            timing=FAST,
+            showcase=layout,
+        )
+        session = Session(settings, opener=opener, icons=MemoryIcons())
+        client = TestClient(create_app(session, token=TOKEN, port=PORT), base_url=ORIGIN)
+        client.__enter__()
+        clients.append(client)
+        api = Api(client)
+        api.session = session
+        return api, device, layout
+
+    yield build
+    for client in clients:
+        client.__exit__(None, None, None)
+
+
+def test_showcase_shows_the_file_and_only_the_listed_apps(showcase):
+    api, _, _ = showcase()
+
+    state = api.read()
+
+    view = state["read"]["view"]
+    assert state["showcase"] is True
+    assert [i["id"] for i in view["dock"]] == ["com.apple.mobilephone", "com.apple.mobilesafari"]
+    assert [i.get("name") for i in view["pages"][0]["items"]] == [
+        "Lights",
+        "Calendar",
+        "Maps",
+        "Studio",
+    ]
+    assert {app["id"] for app in view["library"]} == {"com.apple.tips", "com.apple.stocks"}
+    # The widget's app gives it a name and an icon but stays out of the App Library.
+    assert "com.example.lights" not in {app["id"] for app in state["read"]["apps"]}
+    assert state["device"]["name"] == "iPhone 15"
+    text = json.dumps(state)
+    for private in ("Test iPhone", "com.apple.Health", "com.example.app01", samples.STATUS_CLIP):
+        assert private not in text
+    settled(api)
+    available = set(api.get("/api/icons").json()["available"])
+    assert "com.apple.Health" not in available
+    assert {"com.apple.Maps", "com.example.lights", "com.apple.tips"} <= available
+
+
+def test_showcase_never_writes(showcase, tmp_path):
+    api, device, _ = showcase()
+    view = api.read()["read"]["view"]
+    view["dock"].reverse()
+
+    applied = api.post("/api/apply", {"layout": layout_of(view)})
+    restored = api.post("/api/backups/restore", {"name": "latest"})
+
+    assert (applied.status_code, applied.json()["code"]) == (403, "showcase")
+    assert (restored.status_code, restored.json()["code"]) == (403, "showcase")
+    assert api.get("/api/backups").json()["backups"] == []
+    # Editing and checking still work, against the showcase layout.
+    assert api.post("/api/plan", {"layout": layout_of(view)}).json()["dirty"] is True
+    assert device.writes == []
+    assert not (tmp_path / "data").exists()
+
+
+def test_the_showcase_device_refuses_a_write_on_its_own():
+    from ios_homescreen.device import DeviceError
+    from ios_homescreen.ui.showcase import ReadOnlyDevice
+
+    device = phone()
+    wrapped = ReadOnlyDevice(device)
+
+    with pytest.raises(DeviceError) as error:
+        asyncio.run(wrapped.write_state({"buttonBar": [], "iconLists": [], "ignored": []}))
+    with pytest.raises(DeviceError):
+        asyncio.run(wrapped.set_wifi_connections(True))
+
+    assert error.value.code == "showcase"
+    assert device.writes == []
+    assert wrapped.info["name"] == "iPhone 15"
+    assert asyncio.run(wrapped.read_state()) == samples.home_screen()
+
+
+def test_a_showcase_file_with_problems_is_explained(showcase):
+    api, _, _ = showcase(SHOWCASE.replace('"tips"', '"Nope"'))
+
+    api.post("/api/read")
+    job = api.wait()
+    state = api.get("/api/state").json()
+
+    assert job["state"] == "failed"
+    assert state["error"]["title"] == "The layout has problems"
+    assert "unknown app 'Nope'" in state["error"]["detail"]
+
+
+def test_the_showcase_file_is_read_again_on_every_read(showcase):
+    api, _, layout = showcase()
+    api.read()
+
+    layout.write_text(SHOWCASE.replace('items = ["Phone", "Safari"]', 'items = ["Safari"]'))
+    view = api.read()["read"]["view"]
+
+    assert [i["id"] for i in view["dock"]] == ["com.apple.mobilesafari"]
+
+
+def test_a_phone_that_sends_no_wallpaper_is_not_asked_again(make_api):
+    # iOS 27 drops the request over Wi-Fi; asking on every read only costs time.
+    device = phone(wallpaper=OSError("ConnectionTerminatedError"))
+    api = make_api(device)
+
+    api.read()
+    settled(api)
+    api.read()
+    icons = settled(api)
+
+    assert device.wallpaper_calls == 1
+    assert icons["wallpaper"] is None
+    assert "com.apple.Maps" in icons["available"]
+
+
+JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 16
+
+BEFORE = f"""
+[dock]
+items = ["Phone", "Safari"]
+
+[[pages]]
+items = [
+  {{ type = "widget", id = "{samples.LIGHTS_B}" }},
+  "Calendar",
+  "Health",
+  {{ type = "folder", name = "Studio", items = ["Notes", "Clock"] }},
+]
+"""
+
+
+def test_a_showcase_wallpaper_is_the_phone_background(showcase, tmp_path):
+    (tmp_path / "wall.jpg").write_bytes(JPEG)
+    text = SHOWCASE.replace("[showcase]\n", '[showcase]\nwallpaper = "wall.jpg"\n')
+    api, device, _ = showcase(text, phone(wallpaper=PNG))
+
+    api.read()
+    icons = settled(api)
+
+    assert icons["wallpaper"]
+    assert api.client.get("/api/wallpaper").content == JPEG
+    assert device.wallpaper_calls == 0
+
+
+def test_a_showcase_before_layout_fills_the_change_list(showcase, tmp_path):
+    (tmp_path / "before.toml").write_text(BEFORE)
+    text = SHOWCASE.replace("[showcase]\n", '[showcase]\nbefore = "before.toml"\n')
+    api, device, _ = showcase(text)
+
+    state = api.read()
+    check = api.post("/api/plan", {"layout": layout_of(state["read"]["draft"])}).json()
+
+    # The read is the before layout; the editor starts from the shown one.
+    before = [i.get("name") for i in state["read"]["view"]["pages"][0]["items"]]
+    shown = [i.get("name") for i in state["read"]["draft"]["pages"][0]["items"]]
+    assert before == ["Lights", "Calendar", "Health", "Studio"]
+    assert shown == ["Lights", "Calendar", "Maps", "Studio"]
+    # The folder keeps its id, so it is not listed as deleted and created again.
+    assert state["read"]["draft"]["pages"][0]["items"][3]["id"] == "folder-1"
+    assert check["ok"] is True
+    assert check["dirty"] is True
+    changes = {(c["kind"], c["id"]) for c in check["changes"]}
+    assert changes == {
+        ("added", samples.LIGHTS_A),
+        ("removed", samples.LIGHTS_B),
+        ("added", "com.apple.Maps"),
+        ("to_library", "com.apple.Health"),
+    }
+    assert "com.apple.Health" in {app["id"] for app in state["read"]["apps"]}
+    assert device.writes == []

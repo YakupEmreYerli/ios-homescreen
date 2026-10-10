@@ -9,6 +9,7 @@ are the same ones the TOML layout uses, so they stay stable between the two.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -34,6 +35,77 @@ def _app_name(apps: Mapping[str, Any], ident: str) -> str:
     return ident
 
 
+# Words in widget identifiers that say nothing about what the widget shows.
+_FILLER = frozenset(
+    {"widget", "widgets", "extension", "ext", "kit", "provider", "intent", "intents", "app"}
+)
+_WORD_BREAK = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|[_\-\s]+")
+
+
+def widget_kind(identifier: Any, app_name: str = "") -> str:
+    """A readable name from a ``widgetIdentifier``: ``com.apple.weather.forecast`` gives
+    ``Forecast``, ``UpNextWidget`` gives ``Up Next``. Empty when nothing useful is left."""
+    if not isinstance(identifier, str) or not identifier:
+        return ""
+    last = identifier.rsplit(".", 1)[-1]
+    words = [w for w in _WORD_BREAK.split(last) if w and w.lower() not in _FILLER]
+    if not words or any(sum(c.isdigit() for c in w) > 2 for w in words):
+        return ""
+    text = " ".join(w[0].upper() + w[1:] for w in words)
+    if len(text) > 28 or text.casefold() == app_name.casefold():
+        return ""
+    return text
+
+
+def _container_app(element: Mapping[str, Any], apps: Mapping[str, Any]) -> str | None:
+    """The app a widget belongs to: ``containerBundleIdentifier``, else the installed app
+    whose id the extension's id starts with (``com.example.app.widget`` -> ``com.example.app``)."""
+    container = element.get("containerBundleIdentifier")
+    if isinstance(container, str) and container:
+        return container
+    extension = element.get("bundleIdentifier")
+    if not isinstance(extension, str) or not extension:
+        return None
+    parts = extension.split(".")
+    for end in range(len(parts) - 1, 1, -1):
+        candidate = ".".join(parts[:end])
+        if candidate in apps:
+            return candidate
+    return extension
+
+
+def _widget_view(data: Mapping[str, Any], apps: Mapping[str, Any]) -> dict[str, Any]:
+    """Size, stack, and per widget its app (id and name) and a readable kind.
+
+    The protocol has no picture of what a widget shows, so this is all a UI can draw.
+    """
+    elements = [e for e in data.get("elements", []) or [] if isinstance(e, Mapping)]
+    stack = bool(elements)
+    widgets = []
+    for element in elements or [data]:
+        app = _container_app(element, apps)
+        name = _app_name(apps, app) if app else ""
+        widgets.append(
+            {
+                "app": app,
+                "name": name,
+                "kind": widget_kind(element.get("widgetIdentifier"), name),
+            }
+        )
+    selected = 0
+    chosen = data.get("userSelectedElementIdentifier")
+    for index, element in enumerate(elements):
+        if chosen is not None and element.get("uniqueIdentifier") == chosen:
+            selected = index
+    return {
+        "size": str(data.get("gridSize", "small")),
+        "stack": stack,
+        "apps": [w["app"] for w in widgets if w["app"]],
+        "widgets": widgets,
+        "selected": selected,
+    }
+
+
 def _view(item: Any, apps: Mapping[str, Any], folder_no: list[int]) -> dict[str, Any]:
     kind = item_kind(item)
     data = item if isinstance(item, Mapping) else {}
@@ -54,17 +126,10 @@ def _view(item: Any, apps: Mapping[str, Any], folder_no: list[int]) -> dict[str,
         view["name"] = str(name or _app_name(apps, ident))
         view["offloaded"] = isinstance(item, Mapping) and not item.get("bundleIdentifier")
     elif kind == "widget":
-        elements = [e for e in data.get("elements", []) or [] if isinstance(e, Mapping)]
-        sources = [
-            str(e.get("containerBundleIdentifier") or e.get("bundleIdentifier"))
-            for e in elements
-            if e.get("containerBundleIdentifier") or e.get("bundleIdentifier")
-        ]
-        container = data.get("containerBundleIdentifier")
-        view["size"] = str(data.get("gridSize", "small"))
-        view["stack"] = bool(elements)
-        view["apps"] = sources or ([str(container)] if container else [])
-        view["name"] = str(name or ", ".join(_app_name(apps, a) for a in view["apps"]) or "Widget")
+        view.update(_widget_view(data, apps))
+        view["name"] = str(
+            name or ", ".join(dict.fromkeys(e["name"] for e in view["widgets"])) or "Widget"
+        )
     elif kind == "webclip":
         view["name"] = str(name or "Web clip")
         view["url"] = str(data.get("webClipURL", ""))

@@ -38,6 +38,11 @@ export function iconUrl(id) {
   return `/api/icons/${encodeURIComponent(id)}`;
 }
 
+// The version changes with the image, so the browser never shows an old one.
+export function wallpaperUrl(version) {
+  return `/api/wallpaper?v=${encodeURIComponent(version)}`;
+}
+
 // Follow a job's events as they happen. `onEvent(event)` for each, resolves with the
 // finished job. Falls back to polling if the stream breaks.
 export async function followJob(since, onEvent) {

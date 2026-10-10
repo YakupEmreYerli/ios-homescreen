@@ -17,6 +17,7 @@ Endpoints (all under the guard in :mod:`.security`):
 ``/api/import``           POST    A TOML layout file as an editable view
 ``/api/icons``            GET     Which icons are available, and whether more are coming
 ``/api/icons/{id}``       GET     One icon image
+``/api/wallpaper``        GET     The home screen wallpaper (404 when there is none)
 ========================  ======  ===================================================
 """
 
@@ -41,7 +42,7 @@ from ..planner import LayoutError
 from ..state import StateError
 from .errors import friendly
 from .security import Guard, csp
-from .session import Busy, LayoutProblems, NoRead, Session
+from .session import Busy, LayoutProblems, NoRead, Session, ShowcaseOnly
 
 STATIC = Path(__file__).parent / "static"
 MAX_BODY = 4 * 1024 * 1024
@@ -102,6 +103,8 @@ def _handle(exc: Exception) -> Response:
         return _error(422, "layout_invalid", str(exc), issues=exc.issues)
     if isinstance(exc, LayoutError):
         return _error(422, "layout_invalid", str(exc), issues=exc.to_dict()["issues"])
+    if isinstance(exc, ShowcaseOnly):
+        return _error(403, "showcase", str(exc))
     if isinstance(exc, Busy):
         return _error(409, "busy", str(exc))
     if isinstance(exc, NoRead):
@@ -224,9 +227,7 @@ def create_app(session: Session, *, token: str, port: int) -> Any:
     async def icons(request: Request) -> Response:
         return JSONResponse(session.icon_state())
 
-    async def icon(request: Request) -> Response:
-        ident = request.path_params["ident"]
-        found = session.icon(ident) if _ICON_ID.match(ident) else None
+    def image(request: Request, found: tuple[bytes, str] | None) -> Response:
         if found is None:
             return Response(status_code=404)
         data, media_type = found
@@ -236,6 +237,13 @@ def create_app(session: Session, *, token: str, port: int) -> Any:
         if request.headers.get("if-none-match") == etag:
             return Response(status_code=304, headers=headers)
         return Response(data, media_type=media_type, headers=headers)
+
+    async def icon(request: Request) -> Response:
+        ident = request.path_params["ident"]
+        return image(request, session.icon(ident) if _ICON_ID.match(ident) else None)
+
+    async def wallpaper(request: Request) -> Response:
+        return image(request, session.wallpaper_image())
 
     @asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
@@ -257,6 +265,7 @@ def create_app(session: Session, *, token: str, port: int) -> Any:
         Route("/api/import", import_, methods=["POST"]),
         Route("/api/icons", icons, methods=["GET"]),
         Route("/api/icons/{ident}", icon, methods=["GET"]),
+        Route("/api/wallpaper", wallpaper, methods=["GET"]),
     ]
     return Starlette(
         routes=routes,

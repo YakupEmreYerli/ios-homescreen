@@ -37,6 +37,8 @@ class Options:
     port: int = 0
     open_browser: bool = True
     demo: bool = False
+    showcase: Path | None = None
+    """Show this layout file on the phone's wallpaper and icons, read-only."""
 
 
 def _require() -> None:
@@ -94,6 +96,7 @@ def serve(options: Options, *, say: Callable[[str], None] = print) -> int:
                     backup_dir=scratch / "backups",
                     timing=Timing(read_timeout=10, verify_attempts=3, verify_interval=0.8),
                     demo=True,
+                    showcase=options.showcase,
                 ),
                 opener=opener,
                 icons=MemoryIcons(),
@@ -105,6 +108,7 @@ def serve(options: Options, *, say: Callable[[str], None] = print) -> int:
                     backup_dir=options.backup_dir,
                     timing=options.timing,
                     transport=options.transport,
+                    showcase=options.showcase,
                 )
             )
         app = create_app(session, token=token, port=port)
@@ -129,6 +133,12 @@ def serve(options: Options, *, say: Callable[[str], None] = print) -> int:
                     say("ios-homescreen editor, demo mode: a pretend iPhone, no phone is contacted")
                 else:
                     say("ios-homescreen editor")
+                if options.showcase is not None:
+                    say(
+                        f"Showcase mode: showing {options.showcase.name}. It looks like the "
+                        "normal editor, but nothing is written to the phone: Apply only shows "
+                        "a notice. The App Library lists only [showcase] library."
+                    )
                 say(f"Open: {url}")
                 say("The address works for this run only. Press Ctrl+C to stop.")
                 if options.open_browser:

@@ -1,20 +1,25 @@
 from __future__ import annotations
 
+import ast
 import asyncio
 import time
+from pathlib import Path
 
 import pytest
 
-from ios_homescreen.device import Device, DeviceError
+from ios_homescreen.device import FORBIDDEN_SPRINGBOARD_CALLS, Device, DeviceError
 
 
 class FakeService:
     """Stands in for pymobiledevice3's SpringBoardServicesService."""
 
-    def __init__(self, *, no_reply: bool = False, read_delay: float = 0, icons=None):
+    def __init__(
+        self, *, no_reply: bool = False, read_delay: float = 0, icons=None, wallpaper=None
+    ):
         self.no_reply = no_reply
         self.read_delay = read_delay
         self.icon_data = icons or {}
+        self.wallpaper_data = wallpaper
         self.sent = None
         self.connects = 0
         self.closed = 0
@@ -43,6 +48,11 @@ class FakeService:
         if isinstance(value, Exception):
             raise value
         return value
+
+    async def get_wallpaper_pngdata(self):
+        if isinstance(self.wallpaper_data, Exception):
+            raise self.wallpaper_data
+        return self.wallpaper_data
 
 
 class FakeInstaller:
@@ -241,6 +251,26 @@ def test_icons_use_one_connection_and_return_none_when_missing():
     assert (service.connects, service.closed) == (1, 1)
 
 
+def test_the_wallpaper_comes_from_springboard_on_its_own_connection():
+    service = FakeService(wallpaper=b"\x89PNG wallpaper")
+
+    assert run(_device(service).wallpaper()) == b"\x89PNG wallpaper"
+    assert (service.connects, service.closed) == (1, 1)
+
+
+@pytest.mark.parametrize("answer", [None, b""])
+def test_no_wallpaper_is_none(answer):
+    assert run(_device(FakeService(wallpaper=answer)).wallpaper()) is None
+
+
+def test_a_failed_wallpaper_read_is_a_device_error_and_closes_the_service():
+    service = FakeService(wallpaper=RuntimeError("not supported"))
+
+    with pytest.raises(DeviceError, match="Reading the wallpaper failed"):
+        run(_device(service).wallpaper())
+    assert service.closed == 1
+
+
 def test_wifi_setting_reads_and_writes_through_lockdown():
     device = _device()
 
@@ -255,3 +285,61 @@ def test_close_closes_the_lockdown_connection():
     run(device.close())
 
     assert device.lockdown.closed
+
+
+# ------------------------------------------------------------------ the device's name
+
+
+class NamelessLockdown(FakeLockdown):
+    """A connection that does not resolve the model (the Wi-Fi RSD session)."""
+
+    display_name = None
+
+
+def test_the_model_is_the_name_the_connection_reported():
+    device = _device(marketing_name="iPhone 15 Pro")
+
+    assert device.info["model"] == "iPhone 15 Pro"
+
+
+@pytest.mark.parametrize(
+    ("product", "name"),
+    [("iPhone15,4", "iPhone 15"), ("iPhone18,4", "iPhone Air"), ("iPhone99,1", "iPhone99,1")],
+)
+def test_without_a_name_a_table_names_recent_iphones(product, name):
+    lockdown = NamelessLockdown()
+    lockdown.all_values["ProductType"] = product
+
+    assert Device(lockdown).info["model"] == name
+
+
+# ------------------------------------------------------------------ the accident
+
+
+def test_the_springboard_service_refuses_the_calls_that_write_the_list_form():
+    pytest.importorskip("pymobiledevice3")
+    from ios_homescreen.device import _springboard
+
+    service = _springboard(object())
+
+    for name in ("set_icon_state", "reload_icon_state"):
+        with pytest.raises(DeviceError, match="never used"):
+            run(getattr(service, name)())
+
+
+def test_no_code_calls_the_springboard_writes_that_caused_the_accident():
+    # reload_icon_state reads the layout and writes it back as a list: SpringBoard then
+    # puts every app that is not on it back on the home screen.
+    source = Path(__file__).resolve().parents[1] / "src" / "ios_homescreen"
+    found = []
+    mentions = 0
+    for path in source.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Attribute) and node.attr in FORBIDDEN_SPRINGBOARD_CALLS:
+                found.append(f"{path.name}:{node.lineno}")
+            if isinstance(node, ast.Constant) and node.value in FORBIDDEN_SPRINGBOARD_CALLS:
+                mentions += 1
+
+    assert found == []
+    # The only string mentions are the guard's own list in device.py.
+    assert mentions == len(FORBIDDEN_SPRINGBOARD_CALLS)

@@ -57,7 +57,10 @@ function TopBar() {
   const running = state.job?.state === "running";
   const changes = state.check.changes?.length || 0;
   return html`<header class="topbar">
-    <div class="brand">${logo}<span class="brand-name">ios-homescreen</span>${state.server?.demo ? html`<span class="brand-note">demo mode</span>` : null}</div>
+    <div class="brand">
+      ${logo}<span class="brand-name">ios-homescreen</span>
+      ${state.server?.demo && !state.server?.showcase ? html`<span class="brand-note">demo mode</span>` : null}
+    </div>
     <div class="toolbar">
       <button class="btn btn-ghost narrow-only" onClick=${() => setState({ drawer: state.drawer === "library" ? null : "library" })}>
         <svg viewBox="0 0 20 20"><rect x="3" y="3" width="6" height="6" rx="1.6" /><rect x="11" y="3" width="6" height="6" rx="1.6" /><rect x="3" y="11" width="6" height="6" rx="1.6" /><rect x="11" y="11" width="6" height="6" rx="1.6" /></svg>

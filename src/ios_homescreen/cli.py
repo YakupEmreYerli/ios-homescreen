@@ -306,6 +306,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="only print the address; do not open a browser",
     )
+    group.add_argument(
+        "--showcase",
+        type=Path,
+        metavar="LAYOUT",
+        help="for screenshots: show LAYOUT on the phone's wallpaper and icons, never write, "
+        "and list only the apps in its [showcase] library table",
+    )
 
     backups = commands.add_parser(
         "backups",
@@ -764,6 +771,11 @@ async def _wifi(args: argparse.Namespace, opener: Opener, backend: Any) -> int:
 def _editor(args: argparse.Namespace) -> int:
     from .ui import Options, UIUnavailable, serve
 
+    if args.showcase is not None:
+        from .ui.showcase import load
+
+        load(args.showcase)  # a missing or broken file stops here, before anything starts
+
     options = Options(
         transport=_transport(args),
         data_dir=_data_dir(args),
@@ -772,6 +784,7 @@ def _editor(args: argparse.Namespace) -> int:
         port=args.port,
         open_browser=not args.no_browser,
         demo=args.demo,
+        showcase=args.showcase,
     )
     try:
         return serve(options, say=say)

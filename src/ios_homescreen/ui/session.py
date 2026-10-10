@@ -2,8 +2,9 @@
 
 One :class:`Session` lives as long as the server. It never keeps a connection open
 between operations: every job (read, apply, restore) connects, works and closes, like
-the CLI does. Only one job runs at a time. Icons are fetched after a read on the same
-connection, in the background, and any job that needs the phone cancels that first.
+the CLI does. Only one job runs at a time. The wallpaper and the icons are fetched after
+a read on the same connection, in the background, and any job that needs the phone
+cancels that first.
 
 Nothing here prints; progress goes into the job's event list as
 :meth:`~ios_homescreen.events.Event.to_dict` dicts, which the server streams.
@@ -13,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import logging
 import secrets
 from collections.abc import Awaitable, Callable, Iterable, Mapping
@@ -23,12 +25,13 @@ from typing import Any
 
 from .. import api
 from ..events import ERROR, WARNING, Event
-from ..icons import IconCache
+from ..icons import IconCache, WallpaperCache
 from ..model import describe, describe_changes, match_folders, to_document
 from ..paths import cache_dir
 from ..planner import LayoutError, Plan, load_layout, plan_layout
 from ..state import (
     PAGE_CELLS,
+    StateError,
     is_folder,
     is_hidden_app,
     item_kind,
@@ -38,6 +41,7 @@ from ..state import (
 from ..storage import find_backup, list_backups, save_pull
 from ..transport import Backend, Transport, TransportError
 from ..workflow import Timing
+from . import showcase
 from .errors import friendly
 
 log = logging.getLogger(__name__)
@@ -64,6 +68,12 @@ class LayoutProblems(ValueError):
     def __init__(self, issues: list[dict[str, Any]]) -> None:
         super().__init__("; ".join(str(issue.get("message")) for issue in issues))
         self.issues = issues
+
+
+class ShowcaseOnly(RuntimeError):
+    """Showcase mode never writes to the phone."""
+
+    code = showcase.SHOWCASE_CODE
 
 
 class NoRead(RuntimeError):
@@ -160,6 +170,8 @@ class Settings:
     transport: Transport | None = None
     demo: bool = False
     cache_root: Path | None = None
+    showcase: Path | None = None
+    """``editor --showcase``: show this layout file, read-only (see :mod:`.showcase`)."""
     """Root of the icon cache; ``None`` uses the XDG cache directory."""
 
 
@@ -173,6 +185,15 @@ def _special_ids(state: Any, kinds: Iterable[str]) -> list[str]:
         if isinstance(ident, str) and ident:
             found.append(ident)
     return found
+
+
+def _view_items(view: Mapping[str, Any]) -> Iterable[Mapping[str, Any]]:
+    """Every item of a :func:`describe` view, folder contents included."""
+    for item in [*view.get("dock", []), *(i for p in view.get("pages", []) for i in p["items"])]:
+        yield item
+        if item.get("type") == "folder":
+            for page in item.get("pages", []):
+                yield from page
 
 
 def _image_type(data: bytes) -> str | None:
@@ -221,6 +242,12 @@ class Session:
         self.job: Job | None = None
         self.icon_task: asyncio.Task[Any] | None = None
         self.icons_pending = False
+        self.wallpaper: bytes | None = None
+        self._wallpapers: WallpaperCache | None = None
+        self._no_wallpaper: set[str] = set()
+        """Devices that did not send a wallpaper this session; they are not asked again."""
+        self._own_wallpaper = False
+        self.draft_view: dict[str, Any] | None = None
         self._backup_details: dict[tuple[str, int, int], Any] = {}
 
     # ------------------------------------------------------------------ connection
@@ -238,6 +265,8 @@ class Session:
             device = await self._opener(emit)
         else:
             device = await self._open(self.settings.transport or Transport(), emit)
+        if self.settings.showcase is not None:
+            device = showcase.ReadOnlyDevice(device)
         info = dict(device.info)
         self.device_info = {
             key: info.get(key) for key in ("name", "model", "ios_version") if info.get(key)
@@ -295,7 +324,8 @@ class Session:
             job.finish("failed")
             raise
         except Exception as exc:
-            if not isinstance(exc, api.DeviceError | TransportError | api.WorkflowError):
+            expected = (api.DeviceError, TransportError, api.WorkflowError, LayoutError, StateError)
+            if not isinstance(exc, expected):
                 log.exception("%s failed", job.kind)
             job.error = friendly(exc)
             if job.kind == "read":
@@ -316,16 +346,31 @@ class Session:
         try:
             job.emit(Event("reading", "Reading the home screen (read-only)...", 1, 2))
             snapshot = await api.read_device(device)
-            saved = self._keep_read(snapshot)
-            job.emit(Event("read_saved", f"Saved as {saved.name}.", 2, 2, data={"path": saved}))
-            handed_over = self._fetch_icons(device)
+            if self.settings.showcase is not None:
+                # The file is read again every time, so edits to it show on the next read.
+                path = self.settings.showcase
+                loaded = showcase.load(path)
+                shown = showcase.snapshot(snapshot, loaded)
+                self._keep_read(shown, save=False)
+                self.draft_view = showcase.draft_view(shown, self.view or {})
+                if loaded.wallpaper is not None:
+                    self.wallpaper = loaded.wallpaper
+                self._own_wallpaper = loaded.wallpaper is not None
+                job.emit(Event("showcase", f"Showing {path.name}; nothing is written.", 2, 2))
+                name = path.name
+            else:
+                saved = self._keep_read(snapshot)
+                assert saved is not None
+                job.emit(Event("read_saved", f"Saved as {saved.name}.", 2, 2, data={"path": saved}))
+                name = saved.name
+            handed_over = self._fetch_extras(device)
         finally:
             if not handed_over:
                 await device.close()
-        return {"read": saved.name}
+        return {"read": name}
 
-    def _keep_read(self, snapshot: dict[str, Any]) -> Path:
-        saved = save_pull(snapshot, self.settings.data_dir)
+    def _keep_read(self, snapshot: dict[str, Any], *, save: bool = True) -> Path | None:
+        saved = save_pull(snapshot, self.settings.data_dir) if save else None
         self.read = snapshot
         self.view = describe(snapshot)
         self.read_file = saved
@@ -333,9 +378,17 @@ class Session:
         self.last_error = None
         if self._fixed_icons is None:
             udid = (snapshot.get("device") or {}).get("udid")
-            store = DiskIcons.for_device(udid, self.settings.cache_root or cache_dir())
+            root = self.settings.cache_root or cache_dir()
+            store = DiskIcons.for_device(udid, root)
             self.icons = DiskIcons(store.directory)
+            self._wallpapers = WallpaperCache.for_device(udid, root)
+            if self.wallpaper is None:
+                # Shown until the phone sends the current one, right after the read.
+                self.wallpaper = self._wallpapers.get()
         return saved
+
+    def _device_key(self) -> str:
+        return str(((self.read or {}).get("device") or {}).get("udid") or "unknown")
 
     def _wanted_icons(self) -> list[str]:
         if self.read is None:
@@ -344,23 +397,49 @@ class Session:
         state = self.read["state"]
         apps = self.read.get("apps", {}) or {}
         visible = sorted(ident for ident, meta in apps.items() if not is_hidden_app(meta))
-        wanted = [*visible, *_special_ids(state, {"webapp", "webclip"})]
+        owners = [
+            widget["app"]
+            for item in _view_items(self.view or {})
+            if item.get("type") == "widget"
+            for widget in item.get("widgets", [])
+            if widget.get("app") in apps
+        ]
+        wanted = [*visible, *owners, *_special_ids(state, {"webapp", "webclip"})]
         return [ident for ident in dict.fromkeys(wanted) if ident not in have]
 
-    def _fetch_icons(self, device: Any) -> bool:
-        """Fetch missing icons in the background on ``device``; it is closed afterwards.
-
-        Returns False (and leaves ``device`` to the caller) when nothing is missing.
-        """
-        wanted = self._wanted_icons()
-        if not wanted or not hasattr(device, "icons"):
+    def _fetch_extras(self, device: Any) -> bool:
+        """Fetch the wallpaper and missing icons in the background on ``device``; it is
+        closed afterwards. Returns False (and leaves ``device`` to the caller) when the
+        device offers neither."""
+        wanted = self._wanted_icons() if hasattr(device, "icons") else []
+        wallpaper = (
+            hasattr(device, "wallpaper")
+            and not self._own_wallpaper
+            and self._device_key() not in self._no_wallpaper
+        )
+        if not wanted and not wallpaper:
             return False
         self.icons_pending = True
-        self.icon_task = asyncio.create_task(self._icons_job(device, wanted))
+        self.icon_task = asyncio.create_task(self._extras_job(device, wanted, wallpaper))
         return True
 
-    async def _icons_job(self, device: Any, wanted: list[str]) -> None:
+    async def _extras_job(self, device: Any, wanted: list[str], wallpaper: bool) -> None:
         try:
+            if wallpaper:
+                try:
+                    data = await api.fetch_wallpaper(device, self._wallpapers)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    # Cosmetic too: the cached wallpaper or the flat colour stays. iOS 27
+                    # drops this request over Wi-Fi; do not ask that phone again.
+                    log.info("fetching the wallpaper failed: %s", exc)
+                    self._no_wallpaper.add(self._device_key())
+                else:
+                    if data and _image_type(data):
+                        self.wallpaper = data
+                    else:
+                        self._no_wallpaper.add(self._device_key())
             for start in range(0, len(wanted), ICON_BATCH):
                 await api.fetch_icons(device, wanted[start : start + ICON_BATCH], self.icons)
         except asyncio.CancelledError:
@@ -392,7 +471,7 @@ class Session:
                 issues.append(data)
             return None, issues
         unconfirmed = sorted(set(plan.removed) - set(remove))
-        if unconfirmed:
+        if unconfirmed and self.settings.showcase is None:
             return None, [
                 {
                     "code": "removal_not_allowed",
@@ -426,6 +505,7 @@ class Session:
     def start_apply(
         self, layout: Mapping[str, Any], remove: Iterable[str] = (), *, force: bool = False
     ) -> Job:
+        self._refuse_in_showcase()
         plan, issues = self.plan(layout, remove)
         if plan is None:
             raise LayoutProblems(issues)
@@ -435,7 +515,12 @@ class Session:
 
         return self._start("apply", work)
 
+    def _refuse_in_showcase(self) -> None:
+        if self.settings.showcase is not None:
+            raise ShowcaseOnly("showcase mode never writes to the phone")
+
     def start_restore(self, name: str) -> Job:
+        self._refuse_in_showcase()
         path = self.backup_path(name)
         target = api.load_backup(path)
 
@@ -447,6 +532,7 @@ class Session:
     async def _write_job(
         self, job: Job, kind: str, target: dict[str, Any], *, force: bool = False
     ) -> dict[str, Any]:
+        self._refuse_in_showcase()
         await self._release_icons()
         device = await self._connect(job.emit)
         handed_over = False
@@ -469,7 +555,7 @@ class Session:
                 outcome["reread_error"] = friendly(exc)
             else:
                 self._keep_read(snapshot)
-                handed_over = self._fetch_icons(device)
+                handed_over = self._fetch_extras(device)
         finally:
             if not handed_over:
                 await device.close()
@@ -498,6 +584,8 @@ class Session:
                 "file": self.read_file.name if self.read_file else None,
                 "at": self.read_at,
                 "view": self.view,
+                # Showcase with a ``before`` layout: what the editor starts from.
+                "draft": self.draft_view,
                 "apps": sorted(
                     (
                         {
@@ -514,6 +602,7 @@ class Session:
         return {
             "version": api_version(),
             "demo": self.settings.demo,
+            "showcase": self.settings.showcase is not None,
             "connection": self.connection(),
             "device": self.device_info,
             "read": read,
@@ -525,11 +614,32 @@ class Session:
 
     def icon_state(self) -> dict[str, Any]:
         available = set(self.icons.ids())
+        if self.settings.showcase is not None:
+            # The cache holds every app's icon; name only those the showcase shows.
+            known = set((self.read or {}).get("apps", {}) or {})
+            known.update(_special_ids((self.read or {}).get("state", [[]]), {"webapp", "webclip"}))
+            available &= known
         if self.read is not None:
             for item in iter_items(self.read["state"]):
                 if item_kind(item) == "webclip" and _image_type(item.get("iconData") or b""):
                     available.add(str(item.get("displayIdentifier")))
-        return {"available": sorted(available), "pending": self.icons_pending}
+        return {
+            "available": sorted(available),
+            "pending": self.icons_pending,
+            "wallpaper": self.wallpaper_version(),
+        }
+
+    def wallpaper_version(self) -> str | None:
+        """Changes when the wallpaper does; ``None`` when there is none to show."""
+        found = self.wallpaper_image()
+        return hashlib.sha256(found[0]).hexdigest()[:16] if found else None
+
+    def wallpaper_image(self) -> tuple[bytes, str] | None:
+        data = self.wallpaper
+        kind = _image_type(data) if isinstance(data, bytes) else None
+        if kind is None or (kind == "image/svg+xml" and not self.settings.demo):
+            return None
+        return data, kind
 
     def icon(self, identifier: str) -> tuple[bytes, str] | None:
         data = self.icons.get(identifier)
@@ -585,6 +695,8 @@ class Session:
         return find_backup(self.settings.backup_dir, name, allow_paths=False)
 
     def backups(self) -> list[dict[str, Any]]:
+        if self.settings.showcase is not None:
+            return []
         return [
             backup.to_dict()
             for backup in list_backups(

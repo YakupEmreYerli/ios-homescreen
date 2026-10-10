@@ -30,7 +30,7 @@ from typing import Any
 from .device import Device, DeviceError, open_device
 from .events import Event, EventSink, ignore
 from .export import export_layout, pull_note
-from .icons import IconCache, load_icons
+from .icons import IconCache, WallpaperCache, load_icons
 from .model import describe, describe_changes, to_document
 from .paths import cache_dir, data_dir
 from .planner import LayoutError, LayoutIssue, Plan, changes_between, load_layout, plan_layout
@@ -69,6 +69,7 @@ __all__ = [
     "Timing",
     "Transport",
     "TransportError",
+    "WallpaperCache",
     "WifiStatus",
     "WorkflowError",
     "cache_dir",
@@ -79,6 +80,7 @@ __all__ = [
     "describe_changes",
     "export_layout",
     "fetch_icons",
+    "fetch_wallpaper",
     "find_backup",
     "find_pull",
     "list_backups",
@@ -293,3 +295,14 @@ async def fetch_icons(
 ) -> dict[str, bytes | None]:
     """App icon PNGs by bundle id; ``None`` where the device has none."""
     return await load_icons(device, identifiers, cache)
+
+
+async def fetch_wallpaper(device: Any, cache: WallpaperCache | None = None) -> bytes | None:
+    """The home screen wallpaper as PNG bytes, or ``None`` when the phone sends none.
+
+    A wallpaper that arrives replaces the cached one; ``None`` leaves the cache alone.
+    """
+    data = await device.wallpaper()
+    if cache is not None and data:
+        cache.put(data)
+    return data or None

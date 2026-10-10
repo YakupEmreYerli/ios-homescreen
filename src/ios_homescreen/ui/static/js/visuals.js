@@ -69,8 +69,8 @@ const cloud = html`<svg viewBox="0 0 24 24" aria-hidden="true">
 export function ItemIcon({ item }) {
   if (item.type === "folder") return html`<${FolderIcon} item=${item} />`;
   if (item.type === "widget") {
-    const app = item.apps?.[0] || item.id;
-    return html`<${Icon} id=${app} name=${item.name} />`;
+    const shown = shownWidget(item);
+    return html`<${Icon} id=${shown.app || item.id} name=${shown.name || item.name} />`;
   }
   return html`<${Icon} id=${item.id} name=${item.name} kind=${item.type} dim=${item.offloaded} />`;
 }
@@ -94,23 +94,56 @@ export function Badge({ item }) {
   return null;
 }
 
-function appName(id) {
-  return getState().apps.find((app) => app.id === id)?.name || id;
+// The widgets of a widget or stack: [{ app, name, kind }]. Older views only had `apps`.
+function widgetsOf(item) {
+  if (item.widgets?.length) return item.widgets;
+  const app = item.apps?.[0] || null;
+  const name = app ? getState().apps.find((a) => a.id === app)?.name || "" : "";
+  return [{ app, name: name || item.name, kind: "" }];
+}
+
+// The widget a stack shows on the phone (the one picked there), or the only one.
+export function shownWidget(item) {
+  const widgets = widgetsOf(item);
+  return widgets[Math.min(Math.max(item.selected || 0, 0), widgets.length - 1)];
+}
+
+// The name under a widget: its app's, like on the phone.
+export function widgetLabel(item) {
+  return shownWidget(item).name || item.name;
 }
 
 const SIZE_NAMES = { small: "Small", medium: "Medium", large: "Large", extraLarge: "Extra large" };
 
-// Widgets cannot be drawn as they look on the phone; a plain tile of the real size says
-// which app it belongs to and what it is.
+// The phone does not say what a widget shows, so the tile does not pretend to: it has
+// the widget's real size and corners, its app's icon, and the widget's name when the
+// identifier gives one. A stack shows its other cards behind it and a dot per widget.
 export function WidgetTile({ item }) {
-  const app = item.apps?.[0] || null;
-  const stack = item.stack && item.apps.length > 1;
-  const size = SIZE_NAMES[item.size] || item.size;
-  return html`<div class=${`widget-tile widget-${item.size}`}>
-    <div class="widget-icon">${app ? html`<${Icon} id=${app} name=${item.name} />` : null}</div>
-    <div class="widget-text">
-      <div class="widget-name">${stack ? appName(app) : item.name}</div>
-      <div class="widget-kind">${stack ? `${size} stack of ${item.apps.length}` : `${size} widget`}</div>
+  const widgets = widgetsOf(item);
+  const shown = shownWidget(item);
+  const stack = widgets.length > 1;
+  const title = shown.kind || shown.name || item.name;
+  let note = `${SIZE_NAMES[item.size] || "Small"} widget`;
+  if (stack) note = `Stack of ${widgets.length}`;
+  else if (shown.kind && shown.name) note = shown.name;
+  return html`<div class=${`widget widget-${item.size}${stack ? " is-stack" : ""}`}>
+    ${stack ? html`<div class="widget-behind" aria-hidden="true"></div>` : null}
+    <div class="widget-tile">
+      <div class="widget-icon">${shown.app ? html`<${Icon} id=${shown.app} name=${shown.name} />` : null}</div>
+      ${stack && item.size !== "small"
+        ? html`<div class="widget-members" title=${widgets.map((w) => w.kind || w.name).join(", ")}>
+            ${widgets.map((w, i) => html`<div class="widget-member" key=${i}>${w.app ? html`<${Icon} id=${w.app} name=${w.name} />` : null}</div>`)}
+          </div>`
+        : null}
+      ${stack
+        ? html`<div class="widget-dots" aria-hidden="true">
+            ${widgets.map((w, i) => html`<span class=${w === shown ? "is-current" : ""} key=${i}></span>`)}
+          </div>`
+        : null}
+      <div class="widget-text">
+        <div class="widget-title">${title}</div>
+        <div class="widget-note">${note}</div>
+      </div>
     </div>
   </div>`;
 }

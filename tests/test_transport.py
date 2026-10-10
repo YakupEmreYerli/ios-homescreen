@@ -298,3 +298,28 @@ def test_backend_lists_remote_pairings_and_flags_old_ones(fake_pmd3):
         RemoteRecord(UDID_A, Path("/r/remote_a.plist"), True),
         RemoteRecord(UDID_B, Path("/r/remote_b.plist"), False),
     ]
+
+
+def test_the_marketing_name_comes_from_the_wifi_handshake():
+    from types import SimpleNamespace
+
+    from ios_homescreen.transport import marketing_name
+
+    tunnel = SimpleNamespace(
+        handshake_info={"peerDeviceInfo": {"model": "iPhone15,4", "marketing-name": "iPhone 15"}}
+    )
+    key_value_data = SimpleNamespace(
+        handshake_info={"peerDeviceInfo": {"model": "iPhone17,5"}},
+        auxiliary_metadata={"NULL": {"marketing-name": "iPhone 16e"}},
+    )
+    session = SimpleNamespace(peer_info={"Properties": {"MarketingName": "iPhone Air"}})
+
+    class Unfinished:
+        @property
+        def auxiliary_metadata(self):
+            raise AssertionError("no handshake yet")
+
+    assert marketing_name(tunnel, object()) == "iPhone 15"
+    assert marketing_name(key_value_data, None) == "iPhone 16e"
+    assert marketing_name(object(), session) == "iPhone Air"
+    assert marketing_name(Unfinished(), None) is None

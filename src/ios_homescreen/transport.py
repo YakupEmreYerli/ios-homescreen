@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -76,6 +76,8 @@ class Link:
     kind: str = "usb"
     """``usb`` or ``wifi``."""
     address: str | None = None
+    marketing_name: str | None = None
+    """``iPhone 15``, when the connection said so (the Wi-Fi handshake does)."""
 
 
 @dataclass(frozen=True)
@@ -207,7 +209,48 @@ class PymobiledeviceBackend:
                 raise
             finally:
                 userspace_tunnel._create_no_root_tunnel_provider = original
-        return Link(rsd, tunnel.aclose, kind="wifi", address=address or None)
+        return Link(
+            rsd,
+            tunnel.aclose,
+            kind="wifi",
+            address=address or None,
+            marketing_name=marketing_name(service, rsd),
+        )
+
+
+_MARKETING_KEYS = ("marketing-name", "MarketingName", "marketingName")
+
+
+def marketing_name(*sources: Any) -> str | None:
+    """The phone's marketing name (``iPhone 15``) from what the Wi-Fi handshake left behind.
+
+    The RemotePairing handshake's ``peerDeviceInfo`` and its device key-value data carry
+    ``marketing-name``; the RSD handshake's properties may too. Each source is a tunnel
+    service or an RSD session; anything missing is skipped.
+    """
+    found: list[Any] = []
+    for source in sources:
+        info = getattr(source, "handshake_info", None)
+        if isinstance(info, Mapping):
+            found.append(info.get("peerDeviceInfo"))
+        peer = getattr(source, "peer_info", None)
+        if isinstance(peer, Mapping):
+            found.append(peer.get("Properties"))
+        try:
+            metadata = getattr(source, "auxiliary_metadata", None)
+        except Exception:
+            metadata = None
+        if isinstance(metadata, Mapping):
+            found.append(metadata)
+            found.extend(metadata.values())
+    for table in found:
+        if not isinstance(table, Mapping):
+            continue
+        for key in _MARKETING_KEYS:
+            value = table.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
 
 
 async def close_quietly(close: Callable[[], Awaitable[Any]], timeout: float = 3.0) -> None:

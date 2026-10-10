@@ -28,6 +28,56 @@ APP_ATTRIBUTES = [
 SEND_TIMEOUT = 10.0
 REPLY_TIMEOUT = 3.0
 ICON_TIMEOUT = 10.0
+# Short on purpose: on iOS 27 over Wi-Fi the phone drops this request, and the wallpaper
+# is only decoration.
+WALLPAPER_TIMEOUT = 5.0
+
+# Marketing names for recent iPhones, used when the connection does not say (pymobiledevice3's
+# own table covers USB; over Wi-Fi the handshake usually carries the name).
+IPHONE_NAMES = {
+    "iPhone12,1": "iPhone 11",
+    "iPhone12,3": "iPhone 11 Pro",
+    "iPhone12,5": "iPhone 11 Pro Max",
+    "iPhone12,8": "iPhone SE (2nd generation)",
+    "iPhone13,1": "iPhone 12 mini",
+    "iPhone13,2": "iPhone 12",
+    "iPhone13,3": "iPhone 12 Pro",
+    "iPhone13,4": "iPhone 12 Pro Max",
+    "iPhone14,2": "iPhone 13 Pro",
+    "iPhone14,3": "iPhone 13 Pro Max",
+    "iPhone14,4": "iPhone 13 mini",
+    "iPhone14,5": "iPhone 13",
+    "iPhone14,6": "iPhone SE (3rd generation)",
+    "iPhone14,7": "iPhone 14",
+    "iPhone14,8": "iPhone 14 Plus",
+    "iPhone15,2": "iPhone 14 Pro",
+    "iPhone15,3": "iPhone 14 Pro Max",
+    "iPhone15,4": "iPhone 15",
+    "iPhone15,5": "iPhone 15 Plus",
+    "iPhone16,1": "iPhone 15 Pro",
+    "iPhone16,2": "iPhone 15 Pro Max",
+    "iPhone17,1": "iPhone 16 Pro",
+    "iPhone17,2": "iPhone 16 Pro Max",
+    "iPhone17,3": "iPhone 16",
+    "iPhone17,4": "iPhone 16 Plus",
+    "iPhone17,5": "iPhone 16e",
+    "iPhone18,1": "iPhone 17 Pro",
+    "iPhone18,2": "iPhone 17 Pro Max",
+    "iPhone18,3": "iPhone 17",
+    "iPhone18,4": "iPhone Air",
+}
+
+# pymobiledevice3 calls that write the list form of the layout back, which is how the
+# accident this tool exists to avoid happened. device.py never calls them, and the
+# SpringBoard service it creates refuses them (see _springboard).
+FORBIDDEN_SPRINGBOARD_CALLS = ("set_icon_state", "reload_icon_state")
+
+
+def model_name(product_type: Any) -> str | None:
+    """``iPhone 15`` for ``iPhone15,4``; the identifier itself when it is not known."""
+    if not isinstance(product_type, str) or not product_type:
+        return None
+    return IPHONE_NAMES.get(product_type, product_type)
 
 
 class DeviceError(RuntimeError):
@@ -54,12 +104,14 @@ class Device:
         transport: str = "usb",
         springboard_factory: Callable[[Any], Any] | None = None,
         installer_factory: Callable[[Any], Any] | None = None,
+        marketing_name: str | None = None,
         read_timeout: float = READ_TIMEOUT,
         send_timeout: float = SEND_TIMEOUT,
         reply_timeout: float = REPLY_TIMEOUT,
     ) -> None:
         self.lockdown = lockdown
         self.transport = transport
+        self.marketing_name = marketing_name
         self._close = close
         self._springboard_factory = springboard_factory or _springboard
         self._installer_factory = installer_factory or _installer
@@ -71,12 +123,14 @@ class Device:
     def info(self) -> dict[str, Any]:
         values = getattr(self.lockdown, "all_values", None) or {}
         try:
-            model = getattr(self.lockdown, "display_name", None)
+            # pymobiledevice3's own table, on a USB lockdown client.
+            known = getattr(self.lockdown, "display_name", None)
         except Exception:
-            model = None
+            known = None
+        product = values.get("ProductType") or getattr(self.lockdown, "product_type", None)
         return {
             "name": values.get("DeviceName"),
-            "model": model or values.get("ProductType"),
+            "model": self.marketing_name or known or model_name(product),
             "ios_version": values.get("ProductVersion"),
             "udid": values.get("UniqueDeviceID") or getattr(self.lockdown, "udid", None),
             "wifi_mac": values.get("WiFiAddress"),
@@ -215,6 +269,21 @@ class Device:
 
         return await self._timed(run(), ICON_TIMEOUT * max(1, len(wanted)), "Reading app icons")
 
+    async def wallpaper(self) -> bytes | None:
+        """The home screen wallpaper as PNG bytes (SpringBoard's
+        ``getHomeScreenWallpaperPNGData``), or ``None`` when SpringBoard sends none."""
+        service = self._springboard_factory(self.lockdown)
+
+        async def run() -> bytes | None:
+            await service.connect()
+            try:
+                data = await service.get_wallpaper_pngdata()
+            finally:
+                await service.close()
+            return data if isinstance(data, bytes) and data else None
+
+        return await self._timed(run(), WALLPAPER_TIMEOUT, "Reading the wallpaper")
+
     async def wifi_connections_enabled(self) -> bool:
         value = await self._timed(
             self.lockdown.get_enable_wifi_connections(),
@@ -238,10 +307,24 @@ class Device:
             await close_quietly(self.lockdown.close, self.reply_timeout)
 
 
+def _refuse(name: str) -> Callable[..., Any]:
+    async def refused(*args: Any, **kwargs: Any) -> None:
+        raise DeviceError(
+            f"{name} writes the list form of the layout and is never used; "
+            "writes go through Device.write_state",
+            code="unsafe_payload",
+        )
+
+    return refused
+
+
 def _springboard(lockdown: Any) -> Any:
     from pymobiledevice3.services.springboard import SpringBoardServicesService
 
-    return SpringBoardServicesService(lockdown=lockdown)
+    service = SpringBoardServicesService(lockdown=lockdown)
+    for name in FORBIDDEN_SPRINGBOARD_CALLS:
+        setattr(service, name, _refuse(name))
+    return service
 
 
 def _installer(lockdown: Any) -> Any:
@@ -255,4 +338,6 @@ async def open_device(
 ) -> Device:
     """Connect over ``transport`` and return a :class:`Device`. Close it when done."""
     link = await connect(transport, backend=backend, on_event=on_event)
-    return Device(link.provider, close=link.close, transport=link.kind)
+    return Device(
+        link.provider, close=link.close, transport=link.kind, marketing_name=link.marketing_name
+    )

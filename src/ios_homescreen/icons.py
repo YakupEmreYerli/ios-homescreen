@@ -1,7 +1,9 @@
-"""App icon PNGs from the device, cached on disk.
+"""App icons and the home screen wallpaper from the device, cached on disk.
 
-The cache lives under the XDG cache directory, one folder per device. Icons change
-rarely (app updates); :meth:`IconCache.clear` or deleting the folder refreshes them.
+The cache lives under the XDG cache directory: icons in one folder per device, the
+wallpaper as one file per device. Icons change rarely (app updates); :meth:`IconCache.clear`
+or deleting the folder refreshes them. The browser editor fetches the wallpaper again on
+every read and shows the cached one until then.
 """
 
 from __future__ import annotations
@@ -11,7 +13,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Protocol
 
-from .paths import ICONS, cache_dir
+from .paths import ICONS, WALLPAPERS, cache_dir
 
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$")
 
@@ -61,6 +63,27 @@ class IconCache:
         if self.directory.is_dir():
             for file in self.directory.glob("*.png"):
                 file.unlink()
+
+
+class WallpaperCache:
+    """One wallpaper image per device: ``CACHE/wallpapers/UDID.png``."""
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+
+    @classmethod
+    def for_device(cls, udid: str | None, root: Path | None = None) -> WallpaperCache:
+        name = _file_name(udid or "") or "unknown-device.png"
+        return cls((root or cache_dir()) / WALLPAPERS / name)
+
+    def get(self) -> bytes | None:
+        return self.path.read_bytes() if self.path.is_file() else None
+
+    def put(self, data: bytes) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_name(f".{self.path.name}.tmp")
+        tmp.write_bytes(data)
+        tmp.replace(self.path)
 
 
 async def load_icons(

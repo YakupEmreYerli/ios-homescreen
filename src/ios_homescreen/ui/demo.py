@@ -1,7 +1,8 @@
 """A pretend iPhone for ``ios-homescreen editor --demo``.
 
 Every app, widget and web clip here is invented, with ``com.example.*`` ids and the
-generated icons from :mod:`.demo_icons`. :class:`DemoDevice` answers like the real
+generated icons from :mod:`.demo_icons`. The wallpaper is a plain drawing made for the
+demo: flat dusk hills, no photo and nothing from Apple. :class:`DemoDevice` answers like the real
 :class:`~ios_homescreen.device.Device` (reads, writes, icons), with a short delay so
 progress can be seen, and keeps the layout in memory: nothing touches a phone.
 """
@@ -103,6 +104,16 @@ HANDBOOK = "4F1C2D3E4A5B46C7D8E9F0A1B2C3D4E5"
 PLANNER = "B7C8D9E0-1A2B-4C3D-8E4F-000000000005"
 
 _SPECIAL_ICONS = {HANDBOOK: ("document", "slate"), PLANNER: ("kanban", "teal")}
+
+# Flat colour fields only, in the editor's dusk tones, so icons and labels stay readable.
+WALLPAPER = (
+    b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 390 844" width="1170" '
+    b'height="2532"><rect width="390" height="844" fill="#4B5974"/>'
+    b'<circle cx="286" cy="236" r="78" fill="#5C6A86"/>'
+    b'<path d="M0 548C62 514 128 516 192 540S318 586 390 552V844H0Z" fill="#435069"/>'
+    b'<path d="M0 626C84 596 164 600 236 624S346 654 390 640V844H0Z" fill="#3A465D"/>'
+    b'<path d="M0 712C72 690 168 692 252 712S354 730 390 722V844H0Z" fill="#313B50"/></svg>'
+)
 
 
 def _id(key: str) -> str:
@@ -261,6 +272,9 @@ class DemoDevice:
 
     async def icons(self, identifiers: Iterable[str]) -> dict[str, bytes | None]:
         return {ident: icon(ident) for ident in identifiers}
+
+    async def wallpaper(self) -> bytes:
+        return WALLPAPER
 
     async def wifi_connections_enabled(self) -> bool:
         return True

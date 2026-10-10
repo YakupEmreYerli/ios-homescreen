@@ -43,8 +43,9 @@ yapar.
 - Telefonun kayıtlarını ve yedekleri `~/.local/share/ios-homescreen` altında tutar; çalışma
   klasörüne yalnız düzen dosyası yazılır.
 - Tarayıcıda çalışan bir düzenleyicisi var (`ios-homescreen editor`): uygulamaları, klasörleri
-  ve widget'ları ana ekranın resmi üzerinde sürüklersiniz, her değişikliği telefona yazılmadan
-  önce görürsünüz, aynı güvenlik adımlarıyla uygularsınız. Telefon olmadan denemek için bir
+  ve widget'ları ana ekranın kendi simgeleriyle çizilmiş resmi üzerinde sürüklersiniz,
+  her değişikliği telefona yazılmadan önce görürsünüz, aynı güvenlik adımlarıyla
+  uygularsınız. Telefon olmadan denemek için bir
   demo modu da var.
 - Python'dan da kullanılabilir: komut satırı, `ios_homescreen.api` üzerine ince bir katman.
 
@@ -235,15 +236,20 @@ Changes compared with the pull from iPhone (iPhone 15, iOS 27.0) on 2026-10-10 1
 
 ## Tarayıcı düzenleyicisi
 
-![Demo modunda tarayıcı düzenleyicisi](docs/assets/ui.png)
+![Wi-Fi ile iPhone 15’e bağlı tarayıcı düzenleyicisi (vitrin düzeni)](docs/assets/ui.png)
 
-`ios-homescreen editor` telefonu okur ve tarayıcıda bir düzenleyici açar. Uygulamaları,
+`ios-homescreen editor` telefonu okur ve tarayıcıda, telefonun uygulama simgeleriyle ve
+telefon gönderiyorsa duvar kâğıdıyla bir düzenleyici açar. Uygulamaları,
 klasörleri ve widget'ları ana ekranın resmi üzerinde, sayfalar arasında ve dock'a
 sürükleyebilirsiniz. Bir uygulamayı ötekinin üstüne bırakınca klasör olur; klasöre tıklayınca
 açılır, adını orada değiştirir, içine uygulama atar ya da çıkarırsınız. Soldaki Uygulama
 Arşivi, kurulu olup ana ekranda olmayan uygulamaları gösterir: oradan ana ekrana sürükleyin ya
 da ana ekrandan kaldırmak istediklerinizi oraya bırakın. Sağ tarafta son okumaya göre değişen
 her şey listelenir; düzen siz çalışırken `check` ile aynı kurallarla denetlenir.
+
+Widget'lar gerçek boyutlarında, uygulamalarının simgesi ve adıyla görünür; bir yığın kaç
+widget taşıdığını gösterir. Telefon widget'ın içinde ne gösterdiğini göndermiyor, düzenleyici
+de bunu uydurmuyor.
 
 Uygula önce onay ister, sonra `push` ile aynı adımlardan geçer: yedek, yazma, geri okuma,
 tutmazsa geri dönüş. İlerleme ve sonuç sayfada görünür. Yedekler, otomatik alınan yedekleri
@@ -267,8 +273,8 @@ kendisi sorar.
 
 Düzenleyici yalnız 127.0.0.1'i dinler. Yazdığı adreste her açılışta değişen bir anahtar var;
 sayfa bu anahtarı bir çereze çevirir. Her istek anahtarı taşımalı ve sayfanın kendisinden
-gelmeli. Böylece aynı tarayıcıda açık başka siteler düzenleyiciyi kullanamaz, simgelerinizi ve
-yedeklerinizi göremez. Bir widget'ı kaldırmak, `--allow-removal` gibi ayrı bir onay ister.
+gelmeli. Böylece aynı tarayıcıda açık başka siteler düzenleyiciyi kullanamaz; simgelerinizi,
+duvar kâğıdınızı ve yedeklerinizi göremez. Bir widget'ı kaldırmak, `--allow-removal` gibi ayrı bir onay ister.
 Ctrl+Z geri alır, Ctrl+Shift+Z yineler.
 
 ## Güvenlik modeli
@@ -393,6 +399,10 @@ yeniden düzene çevirir; `plan.change_list` değişiklikleri veri olarak tutar.
   widget) varsayılan seçime dönebilir: SpringBoard yazma sırasında bu seçimi bırakıyor (iOS 27'de
   görüldü). Yazmadan sonraki denetim de bu yüzden bu seçime bakmaz.
 - Wi-Fi için iOS 17 ya da sonrası gerekir.
+- Tarayıcı düzenleyicisi telefonun duvar kâğıdını yalnız SpringBoard gönderirse gösterir.
+  iOS 27'de Wi-Fi üzerinden telefon bu isteği kapatıyor (iOS 27.0.1'de görüldü); düzenleyici
+  o zaman düz bir arka plan kullanır. Görüntü almanın tek başka yolu, simgeleriyle birlikte
+  ana ekranın ekran görüntüsü; o da arka plan olarak kullanılamaz.
 - Boş sayfalar yazılmaz; SpringBoard onları tutmuyor.
 - Sayfa kapasitesi iPhone ızgarasına (6'ya 4) göre hesaplanır. iPad'de denenmedi.
 - Düzen biçimi Apple'ın ve belgelenmemiş; bir iOS güncellemesi onu değiştirebilir.

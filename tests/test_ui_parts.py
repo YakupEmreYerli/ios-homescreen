@@ -371,3 +371,65 @@ def test_editor_passes_the_options_through(monkeypatch, tmp_path):
     assert (options.port, options.open_browser, options.demo) == (8123, False, False)
     assert options.data_dir == tmp_path
     assert options.backup_dir == tmp_path / "backups"
+
+
+def test_editor_showcase_passes_the_layout_file_through(monkeypatch, tmp_path):
+    import ios_homescreen.ui as ui
+
+    seen = []
+    monkeypatch.setattr(ui, "serve", lambda options, say: seen.append(options) or 0)
+    layout = tmp_path / "showcase.toml"
+    layout.write_text('[showcase]\nlibrary = ["Maps"]\n[dock]\nitems = ["Phone"]\n')
+
+    assert main(["editor", "--showcase", str(layout), "--wifi"]) == 0
+
+    (options,) = seen
+    assert options.showcase == layout
+    assert options.transport == api.Transport(wifi=True)
+    assert options.demo is False
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        (None, "No such file"),
+        ("[dock\n", "invalid TOML"),
+        ('[showcase]\nlibary = ["Maps"]\n', "unknown key(s) in [showcase]: libary"),
+    ],
+)
+def test_editor_showcase_checks_the_file_before_starting(
+    monkeypatch, tmp_path, capsys, text, message
+):
+    import ios_homescreen.ui as ui
+
+    monkeypatch.setattr(ui, "serve", lambda options, say: pytest.fail("must not start"))
+    layout = tmp_path / "showcase.toml"
+    if text is not None:
+        layout.write_text(text)
+
+    assert main(["editor", "--showcase", str(layout)]) == 1
+    assert message in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("table", "files", "message"),
+    [
+        ('wallpaper = "wall.png"\n', {"wall.png": b"not an image"}, "is not a PNG or JPEG"),
+        ('wallpaper = "gone.png"\n', {}, "No such file"),
+        ('before = "gone.toml"\n', {}, "No such file"),
+        ('before = "bad.toml"\n', {"bad.toml": b"[dock\n"}, "[showcase] before = 'bad.toml'"),
+    ],
+)
+def test_editor_showcase_checks_its_wallpaper_and_before_files(
+    monkeypatch, tmp_path, capsys, table, files, message
+):
+    import ios_homescreen.ui as ui
+
+    monkeypatch.setattr(ui, "serve", lambda options, say: pytest.fail("must not start"))
+    for name, data in files.items():
+        (tmp_path / name).write_bytes(data)
+    layout = tmp_path / "showcase.toml"
+    layout.write_text("[showcase]\n" + table + '[dock]\nitems = ["Phone"]\n')
+
+    assert main(["editor", "--showcase", str(layout)]) == 1
+    assert message in capsys.readouterr().err

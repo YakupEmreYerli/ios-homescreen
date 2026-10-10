@@ -27,8 +27,10 @@ In scope:
   record on `wifi setup`, deletes it on `wifi off --forget`, and otherwise only reads
   it; it must never copy or send it anywhere.
 - Anything that lets another website, another origin or another machine use the browser
-  editor (`ios-homescreen editor`), read its icons, backups or layout, or write to the phone
-  without the user pressing Apply or Restore and confirming.
+  editor (`ios-homescreen editor`), read its icons, wallpaper, backups or layout, or write
+  to the phone without the user pressing Apply or Restore and confirming.
+- Anything that makes `editor --showcase` write to the phone, or put apps on the page that
+  the showcase file does not name.
 - Writing outside the data, cache or output paths the user chose, for example through a
   crafted file name, bundle id or layout file.
 - Crafted pull snapshots, backups or layout files that make the tool do something other than

@@ -431,6 +431,8 @@ def test_the_pull_and_showcase_tables_are_accepted_and_ignored_for_planning():
         ('[showcase]\nlibary = ["A"]\n', "unknown key(s) in [showcase]: libary"),
         ('[showcase]\nlibrary = "A"\n', "[showcase] library has the wrong type"),
         ('[showcase]\nlibrary = ["A", 3]\n', "[showcase] library must list app names or ids"),
+        ("[showcase]\nwallpaper = 3\n", "[showcase] wallpaper has the wrong type"),
+        ('[showcase]\nbefore = ["a.toml"]\n', "[showcase] before has the wrong type"),
         ("[dok]\n", "unknown top-level key(s): dok"),
     ],
 )
@@ -506,3 +508,14 @@ def test_example_layout_in_the_repository_plans_cleanly():
 
     assert plan.payload["ignored"] == ["com.apple.tips"]
     assert len(plan.payload["buttonBar"]) == 4
+
+
+def test_a_layout_that_is_only_shown_may_leave_out_web_clips_and_widgets():
+    read = samples.read_snapshot()
+    layout = '[dock]\nitems = ["Phone"]\n[[pages]]\nitems = ["Maps"]\n'
+
+    with pytest.raises(LayoutError, match="cannot be removed"):
+        plan_layout(layout, read, allow_removal=True)
+    plan = plan_layout(layout, read, display_only=True)
+
+    assert len(plan.payload["iconLists"]) == 1

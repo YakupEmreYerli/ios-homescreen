@@ -41,6 +41,7 @@ class FakeSpringBoard:
         ignore_writes: bool = False,
         info: Mapping[str, Any] | None = None,
         wifi_enabled: bool = False,
+        wallpaper: bytes | Exception | None = None,
     ) -> None:
         dock, pages = split_state(state)
         self._state = [deepcopy(dock), *deepcopy(pages)]
@@ -51,6 +52,8 @@ class FakeSpringBoard:
         self.reads = 0
         self.closed = False
         self.wifi_enabled = wifi_enabled
+        self.wallpaper_png = wallpaper
+        self.wallpaper_calls = 0
         self.info = dict(
             info
             or {
@@ -147,6 +150,12 @@ class FakeSpringBoard:
             for ident in identifiers
         }
 
+    async def wallpaper(self) -> bytes | None:
+        self.wallpaper_calls += 1
+        if isinstance(self.wallpaper_png, Exception):
+            raise self.wallpaper_png
+        return self.wallpaper_png
+
     async def wifi_connections_enabled(self) -> bool:
         return self.wifi_enabled
 
@@ -184,6 +193,7 @@ class FakeWifiBackend:
         answering: bool = True,
         address: str = "192.0.2.7",
         pair_udid: str = "00008120-000A1B2C3D4E5F60",
+        marketing_name: str | None = "iPhone 15",
     ):
         from ios_homescreen.transport import RemoteRecord
 
@@ -196,6 +206,7 @@ class FakeWifiBackend:
         self.closed = 0
         self.home = home
         self.pair_udid = pair_udid
+        self.marketing_name = marketing_name
 
     async def usb(self, udid, pair_timeout):
         self.calls.append(("usb", udid))
@@ -211,7 +222,13 @@ class FakeWifiBackend:
         async def close():
             self.closed += 1
 
-        return Link(FakeLockdown(), close, kind="wifi", address=self.address)
+        return Link(
+            FakeLockdown(),
+            close,
+            kind="wifi",
+            address=self.address,
+            marketing_name=self.marketing_name,
+        )
 
     def remote_records(self):
         return list(self.records)

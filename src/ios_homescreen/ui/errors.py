@@ -105,6 +105,10 @@ _KNOWN: dict[str, tuple[str, list[str]]] = {
             "the phone's current layout.",
         ],
     ),
+    "showcase": (
+        "Showcase mode does not write",
+        ["Start the editor without --showcase to change the phone."],
+    ),
     "unsafe_payload": (
         "The layout was refused before sending",
         ["Nothing was written. Please report this as a bug, with the details below."],

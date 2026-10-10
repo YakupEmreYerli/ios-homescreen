@@ -112,6 +112,7 @@ export function describeChange(change, draft) {
   const name = change.name || kindName(change.type);
   switch (change.kind) {
     case "added":
+      if (change.type && change.type !== "app") return { title: name, detail: `Added to ${to()}`, tone: "add" };
       return { title: name, detail: `Comes from the App Library to ${to()}`, tone: "add" };
     case "moved":
     case "reordered":

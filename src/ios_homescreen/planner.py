@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import tomllib
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -65,7 +65,10 @@ _ITEM_KEYS = {
     "folder": {"type", "name", "items", "pages"},
 }
 _TOP_LEVEL_KEYS = {"dock", "pages", "pull", "showcase"}
-_TABLE_KEYS = {"pull": {"snapshot": str}, "showcase": {"library": list}}
+_TABLE_KEYS = {
+    "pull": {"snapshot": str},
+    "showcase": {"library": list, "wallpaper": str, "before": str},
+}
 
 
 @dataclass(frozen=True)
@@ -182,13 +185,18 @@ def _app_name(meta: Any) -> str | None:
 
 
 class _Resolver:
-    """Look up layout references in the read: raw items, installed apps and names."""
+    """Look up layout references in the read: raw items, installed apps and names.
+
+    ``read["extra_items"]``, when present, holds more raw items a layout may use than the
+    layout in ``read["state"]`` has (``editor --showcase`` with a ``before`` layout).
+    """
 
     def __init__(self, read: Mapping[str, Any]):
         self.installed: Mapping[str, Any] = read.get("apps", {}) or {}
         self.raw: dict[str, Any] = {}
         self.names: dict[str, set[str]] = defaultdict(set)
-        for item in iter_items(read["state"]):
+        extra = [x for x in read.get("extra_items", []) or [] if not is_folder(x)]
+        for item in [*iter_items(read["state"]), *extra]:
             if is_folder(item):
                 continue
             try:
@@ -437,7 +445,25 @@ def _not_removable(ident: str, item: Any) -> LayoutIssue:
     )
 
 
-def _check_tables(document: Mapping[str, Any]) -> None:
+def resolve_apps(refs: Iterable[str], read: Mapping[str, Any]) -> list[str]:
+    """Bundle ids for app references (ids or names, like a layout's bare strings).
+
+    Raises :class:`LayoutError` listing every reference that does not name one app.
+    """
+    resolver = _Resolver(read)
+    found: list[str] = []
+    issues: list[LayoutIssue] = []
+    for ref in refs:
+        try:
+            found.append(item_id(resolver.app_by_ref(ref, Location())))
+        except LayoutError as error:
+            issues.extend(error.issues)
+    if issues:
+        raise LayoutError(issues)
+    return list(dict.fromkeys(found))
+
+
+def check_tables(document: Mapping[str, Any]) -> None:
     """``[pull]`` and ``[showcase]`` are optional, but a typo in them must not pass."""
     for name, keys in _TABLE_KEYS.items():
         if name not in document:
@@ -465,9 +491,12 @@ def plan_layout(
     read: Mapping[str, Any],
     *,
     allow_removal: bool = False,
+    display_only: bool = False,
 ) -> Plan:
     """Validate a layout and turn it into a plan that :func:`ios_homescreen.api.push` writes.
 
+    ``display_only`` is for layouts that are only shown, never written (``editor
+    --showcase``): leaving out widgets, web clips and web apps is then fine.
     Raises :class:`LayoutError` listing every problem found.
     """
     document = load_layout(source)
@@ -479,7 +508,7 @@ def plan_layout(
             "showcase)",
             keys=unknown,
         )
-    _check_tables(document)
+    check_tables(document)
     planner = _Planner(read)
 
     dock_where = Location("dock")
@@ -522,7 +551,7 @@ def plan_layout(
     before_specials, after_specials = _specials(source_state), _specials(draft)
     missing = {i: x for i, x in sorted(before_specials.items()) if i not in after_specials}
     removed = tuple(i for i, x in missing.items() if item_kind(x) not in NOT_REMOVABLE)
-    if not planner.issues:
+    if not planner.issues and not display_only:
         # Only once everything resolved: an unresolved entry would look left out.
         planner.issues.extend(
             _not_removable(i, x) for i, x in missing.items() if item_kind(x) in NOT_REMOVABLE

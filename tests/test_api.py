@@ -38,6 +38,7 @@ def test_connect_over_wifi_closes_the_tunnel_with_the_device(tmp_path):
     run(device.close())
 
     assert device.transport == "wifi"
+    assert device.info["model"] == "iPhone 15"
     assert backend.closed == 1
 
 

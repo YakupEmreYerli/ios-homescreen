@@ -121,3 +121,92 @@ def test_issues_inside_folders_point_into_the_folder():
         "folder_page": 1,
         "folder_item": 6,
     }
+
+
+# ------------------------------------------------------------------ widgets
+
+
+def test_a_widget_says_which_app_it_belongs_to_and_what_it_is():
+    read = samples.read_snapshot()
+    read["apps"]["com.apple.weather"] = {"name": "Weather", "type": "System"}
+    page1 = describe(read)["pages"][0]["items"]
+
+    weather = _find(page1, samples.WEATHER_WIDGET)
+
+    assert weather["stack"] is False
+    assert weather["apps"] == ["com.apple.weather"]
+    assert weather["widgets"] == [
+        {"app": "com.apple.weather", "name": "Weather", "kind": "Forecast"}
+    ]
+    assert weather["selected"] == 0
+    assert weather["name"] == "Weather"
+
+
+def test_a_stack_lists_its_widgets_and_the_one_the_phone_shows():
+    page2 = describe(samples.read_snapshot())["pages"][1]["items"]
+
+    stack = _find(page2, samples.STACK)
+
+    assert stack["stack"] is True
+    assert (stack["size"], stack["cells"]) == ("small", 4)
+    assert [(w["app"], w["name"], w["kind"]) for w in stack["widgets"]] == [
+        ("com.apple.mobilecal", "Calendar", "Upnext"),
+        ("com.apple.reminders", "Reminders", "List"),
+    ]
+    assert stack["selected"] == 1  # userSelectedElementIdentifier names the second one
+    assert stack["name"] == "Calendar, Reminders"
+
+
+def test_two_widgets_of_one_app_share_its_name_but_not_their_id():
+    page2 = describe(samples.read_snapshot())["pages"][1]["items"]
+
+    first, second = _find(page2, samples.LIGHTS_A), _find(page2, samples.LIGHTS_B)
+
+    assert (
+        first["widgets"]
+        == second["widgets"]
+        == [{"app": "com.example.lights", "name": "Lights", "kind": "Scene"}]
+    )
+    assert first["id"] != second["id"]
+
+
+def test_without_a_container_id_the_widget_belongs_to_the_app_its_extension_is_in():
+    read = {
+        "state": [
+            [],
+            [
+                {
+                    "elementType": "widget",
+                    "bundleIdentifier": "com.example.lights.widgets.extension",
+                    "displayIdentifier": "W-1",
+                    "widgetIdentifier": "WidgetKitExtension",
+                    "gridSize": "medium",
+                }
+            ],
+        ],
+        "apps": {"com.example.lights": {"name": "Lights", "type": "User"}},
+    }
+
+    (widget,) = describe(read)["pages"][0]["items"]
+
+    assert widget["widgets"] == [{"app": "com.example.lights", "name": "Lights", "kind": ""}]
+
+
+@pytest.mark.parametrize(
+    ("identifier", "app", "kind"),
+    [
+        ("com.apple.weather.forecast", "Weather", "Forecast"),
+        ("UpNextWidget", "Calendar", "Up Next"),
+        ("up-next", "Calendar", "Up Next"),
+        ("SceneWidget", "Lights", "Scene"),
+        ("com.apple.weather.Weather", "Weather", ""),
+        ("WidgetKitExtension", "Lights", ""),
+        ("3F2A9C11-0000-4000-8000-000000000001", "Lights", ""),
+        ("", "Lights", ""),
+        (None, "Lights", ""),
+    ],
+)
+def test_widget_kinds_are_readable_or_left_out(identifier, app, kind):
+    from ios_homescreen.model import widget_kind
+
+    assert widget_kind(identifier, app) == kind
