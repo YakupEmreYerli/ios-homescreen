@@ -38,7 +38,8 @@ def test_services_and_their_remote_shims():
 
     assert {"format_version"} <= _params(SpringBoardServicesService.get_icon_state)
     assert inspect.iscoroutinefunction(SpringBoardServicesService.get_icon_pngdata)
-    assert {"application_type"} <= _params(InstallationProxyService.get_apps)
+    assert inspect.iscoroutinefunction(InstallationProxyService.lookup)
+    assert {"options"} <= _params(InstallationProxyService.lookup)
     # Over the Wi-Fi tunnel the services are reached through their *.shim.remote names.
     assert SpringBoardServicesService.RSD_SERVICE_NAME.endswith(".shim.remote")
     assert InstallationProxyService.RSD_SERVICE_NAME.endswith(".shim.remote")

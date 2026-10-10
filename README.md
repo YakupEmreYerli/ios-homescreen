@@ -20,6 +20,8 @@ text editor, checks your edits offline, and writes the result to the phone. Ever
 backed up first, verified by reading the phone again, and rolled back automatically if the
 phone does not end up with the layout you asked for.
 
+If you would rather drag icons around, `ios-homescreen ui` does the same in a browser editor.
+
 ## Features
 
 - Exports the dock, pages, folders (including multi-page folders), widgets, widget stacks,
@@ -34,6 +36,9 @@ phone does not end up with the layout you asked for.
 - Works over USB, or over Wi-Fi (iOS 17 and later) after a one-time setup over USB. Neither
   needs root or Developer Mode.
 - Keeps reads, backups and plans in `~/.local/share/ios-homescreen`, not in the current directory.
+- Has a browser editor (`ios-homescreen ui`): drag apps, folders and widgets on a picture
+  of your home screen, see every change before it is written, and apply it with the same
+  safety steps. A demo mode needs no phone.
 - Can be used from Python: the CLI is a thin layer over `ios_homescreen.api`.
 
 ## Requirements
@@ -57,6 +62,13 @@ With [pipx](https://pipx.pypa.io/):
 
 ```bash
 pipx install git+https://github.com/YakupEmreYerli/ios-homescreen
+```
+
+The browser editor uses Starlette and uvicorn, which pymobiledevice3 already installs. The `ui`
+extra names them explicitly, in case that ever changes:
+
+```bash
+uv tool install "ios-homescreen[ui] @ git+https://github.com/YakupEmreYerli/ios-homescreen"
 ```
 
 From a clone, for development:
@@ -102,12 +114,13 @@ ios-homescreen restore ~/.local/share/ios-homescreen/backups/backup-20261010-101
 | `restore BACKUP --yes` | Writes a backup or read snapshot back, with the same safety steps | Writes |
 | `diff BEFORE AFTER` | Compares two saved layouts (reads, backups, plans, or plist/JSON state dumps) | No |
 | `wifi status\|enable\|disable` | Sets up, checks or turns off Wi-Fi access to the phone | Yes |
+| `ui` | Opens the browser editor on 127.0.0.1 | Reads; writes only when you press Apply |
 
 Options for `export` and `plan`: `-o/--output FILE`, and `--allow-removal` for `plan` (see the
 layout reference). `read` takes `-o/--output DIR`. `apply` takes `--force` (see the safety model).
 Every command except `diff` and `wifi` takes `--data-dir DIR`.
 
-Connection options, for `read`, `apply`, `restore` and `wifi`:
+Connection options, for `read`, `apply`, `restore`, `wifi` and `ui`:
 
 | Option | Meaning |
 | --- | --- |
@@ -117,7 +130,7 @@ Connection options, for `read`, `apply`, `restore` and `wifi`:
 | `--discovery-timeout SECONDS` | How long to listen for Bonjour answers (default 5) |
 | `--connect-timeout SECONDS` | Time limit for opening the connection (default 30) |
 
-Write options, for `apply` and `restore`:
+Write options, for `apply` and `restore` (and for `ui`, except `--yes`):
 
 | Option | Meaning |
 | --- | --- |
@@ -188,6 +201,42 @@ Rules the planner enforces:
 `plan` reports every problem it finds with its place, for example
 `page 2, item 5: unknown app 'Mpas'`.
 
+## Browser editor
+
+![The browser editor in demo mode](docs/assets/ui.png)
+
+`ios-homescreen ui` reads the phone and opens an editor in your browser. Drag apps, folders
+and widgets around the picture of the home screen, between pages and into the dock. Drop an
+app on another one to make a folder; click a folder to open it, rename it, and drag apps in
+or out. The App Library on the left lists the apps that are installed but not on the home
+screen: drag them in, or drag apps there to take them off the home screen. The right side
+lists every change compared with the last read and checks the layout with the same rules as
+`plan` while you edit.
+
+Apply asks for confirmation, then runs the same steps as `apply`: backup, write, read back,
+roll back if it does not match. The progress and the result show in the page. Backups lists
+the automatic backups and restores one the same way. Import and Export load and save the TOML
+layout file, so you can switch between the editor and a text editor.
+
+```bash
+ios-homescreen ui              # over USB; add --wifi for Wi-Fi
+ios-homescreen ui --demo       # a pretend iPhone with made-up apps
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--port PORT` | Port on 127.0.0.1 (default: any free port) |
+| `--no-browser` | Only print the address; do not open a browser |
+| `--demo` | Use a pretend iPhone; nothing connects to a phone, and reads, backups and plans go to a temporary folder |
+
+The connection and write options work as for `apply`. `--yes` is not needed: the editor asks.
+
+The editor listens on 127.0.0.1 only. The address it prints contains a key that changes on
+every start; the page trades it for a cookie, and every request has to carry the key and come
+from the page itself, so other websites open in the same browser cannot use the editor or
+see your icons and backups. Removing a widget needs its own confirmation, like
+`--allow-removal`. Ctrl+Z and Ctrl+Shift+Z undo and redo.
+
 ## How the safety model works
 
 The home screen protocol is undocumented, and two of its behaviours caused real damage while
@@ -233,7 +282,7 @@ already trusted over USB, so the phone shows no prompt. Root, Developer Mode and
 service are not needed: the connection runs through pymobiledevice3's userspace network stack
 inside the ios-homescreen process.
 
-After that, add `--wifi` to `read`, `apply` or `restore`. The phone must be on the same
+After that, add `--wifi` to `read`, `apply`, `restore` or `ui`. The phone must be on the same
 network as the computer, awake and unlocked. ios-homescreen looks for it with Bonjour
 (`_remotepairing._tcp`) for `--discovery-timeout` seconds and recognises it by the pairing,
 not by its address (iOS uses private, changing Wi-Fi addresses). If this computer is paired
@@ -253,7 +302,7 @@ every service on the first request.
 | What | Default | Override |
 | --- | --- | --- |
 | Reads, backups, plans | `$XDG_DATA_HOME/ios-homescreen`, or `~/.local/share/ios-homescreen` | `--data-dir`, `IOS_HOMESCREEN_DATA_DIR` |
-| App icon cache (Python API) | `$XDG_CACHE_HOME/ios-homescreen`, or `~/.cache/ios-homescreen` | `IOS_HOMESCREEN_CACHE_DIR` |
+| App icon cache (browser editor, Python API) | `$XDG_CACHE_HOME/ios-homescreen`, or `~/.cache/ios-homescreen` | `IOS_HOMESCREEN_CACHE_DIR` |
 | Wi-Fi pairing (pymobiledevice3) | `$XDG_DATA_HOME/pymobiledevice3`, or `~/.local/share/pymobiledevice3` | `XDG_DATA_HOME` |
 
 Inside the data directory: `reads/read-*.plist` with a `.txt` summary next to each,
@@ -288,7 +337,8 @@ asyncio.run(main())
 ```
 
 Progress arrives as `Event` objects with a stable `code`; results and errors have `to_dict()`
-and machine-readable codes. `api.fetch_icons` returns app icons as PNG bytes.
+and machine-readable codes. `api.fetch_icons` returns app icons as PNG bytes, and
+`api.describe_changes(before, after)` lists what differs between two views.
 
 ## Limitations
 
@@ -302,6 +352,7 @@ and machine-readable codes. `api.fetch_icons` returns app icons as PNG bytes.
   widget, back to their default choice: SpringBoard drops that choice on a write (seen on
   iOS 27). The check after writing ignores it for that reason.
 - Wi-Fi needs iOS 17 or later.
+- Empty pages are not written; SpringBoard does not keep them.
 - Page capacity uses the iPhone grid (6 by 4). iPads have not been tested.
 - The layout format is Apple's and undocumented, and an iOS update can change it. Run `read`
   first after an update; the backup and rollback are there for the case where it changes.
@@ -329,6 +380,9 @@ answers. Guest networks and client isolation keep the two apart, and firewalls m
 `this computer has no Wi-Fi pairing yet`, or a pairing made by an older pymobiledevice3: run
 `wifi enable` over USB again.
 
+The browser says the page needs the address from the terminal: open the full address that
+`ios-homescreen ui` printed. The key in it changes every time the editor starts.
+
 `the device layout changed since the read`: the phone was edited after your `read`. Run
 `read` again and plan again, or use `--force` if you are sure.
 
@@ -349,9 +403,15 @@ helped too. No code was copied from either project.
 
 Device communication goes through [pymobiledevice3](https://github.com/doronz88/pymobiledevice3),
 including its RemotePairing support and userspace tunnel for Wi-Fi, and USB access through
-[usbmuxd](https://github.com/libimobiledevice/usbmuxd) from the libimobiledevice project.
+[usbmuxd](https://github.com/libimobiledevice/usbmuxd) from the libimobiledevice project. The
+browser editor is built with [Preact](https://preactjs.com) and [htm](https://github.com/developit/htm)
+and served by [Starlette](https://www.starlette.io) and [uvicorn](https://www.uvicorn.org).
 
 ## License
 
 [MIT](LICENSE). ios-homescreen depends on pymobiledevice3, which is licensed GPL-3.0-or-later;
 if you distribute the two together as one program, that combination falls under the GPL.
+The browser editor ships unmodified copies of Preact (MIT), htm (Apache-2.0) and the IBM Plex
+Sans font (SIL Open Font License 1.1); their licenses are next to them in
+[`src/ios_homescreen/ui/static/vendor`](src/ios_homescreen/ui/static/vendor) and
+[`src/ios_homescreen/ui/static/fonts`](src/ios_homescreen/ui/static/fonts).

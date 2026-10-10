@@ -235,9 +235,17 @@ def app_type(meta: Any) -> str | None:
 
 
 def counts_for_home_screen(meta: Any) -> bool:
-    """User and System apps can appear on the home screen; extensions and the like cannot."""
+    """User and System apps can appear on the home screen; extensions and the like cannot.
+
+    This includes hidden system services: a write must list them in ``ignored`` too.
+    """
     kind = app_type(meta)
     return kind is None or kind in HOME_SCREEN_APP_TYPES
+
+
+def is_hidden_app(meta: Any) -> bool:
+    """A system service iOS never shows (``SBAppTags`` contains ``hidden``)."""
+    return isinstance(meta, Mapping) and bool(meta.get("hidden"))
 
 
 def normalize_for_write(item: Any) -> Any:

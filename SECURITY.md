@@ -25,6 +25,9 @@ In scope:
   access the phone. ios-homescreen has pymobiledevice3 create the Wi-Fi (RemotePairing)
   record on `wifi enable`, deletes it on `wifi disable --forget`, and otherwise only reads
   it; it must never copy or send it anywhere.
+- Anything that lets another website, another origin or another machine use the browser
+  editor (`ios-homescreen ui`), read its icons, backups or layout, or write to the phone
+  without the user pressing Apply or Restore and confirming.
 - Writing outside the data, cache or output paths the user chose, for example through a
   crafted file name, bundle id or layout file.
 - Crafted read, backup, plan or layout files that make the tool do something other than
@@ -48,3 +51,10 @@ Out of scope:
   user already has.
 - App icon cache file names are restricted to plain identifier characters, so an id cannot
   point outside the cache directory.
+- The browser editor listens on 127.0.0.1 only. A random key printed at start is traded for an
+  `HttpOnly`, `SameSite=Strict` cookie; every API call also needs the key in a header, the
+  `Host` header must be the server's own (against DNS rebinding), `Sec-Fetch-Site` must be
+  same-origin, and requests that change something must carry the server's own `Origin`.
+  Responses forbid framing and cross-origin embedding, and the page runs under a strict
+  Content Security Policy. Backups are listed and restored by name; their contents are never
+  served.

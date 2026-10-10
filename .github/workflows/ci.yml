@@ -17,7 +17,7 @@ jobs:
       - uses: astral-sh/setup-uv@v10.3.0
         with:
           python-version: "3.13"
-      - run: uv sync --locked
+      - run: uv sync --locked --all-extras
       - run: uv run ruff check
       - run: uv run ruff format --check
 
@@ -33,11 +33,20 @@ jobs:
       - uses: astral-sh/setup-uv@v10.3.0
         with:
           python-version: ${{ matrix.python-version }}
-      - run: uv sync --locked
+      - run: uv sync --locked --all-extras
       - run: uv run pytest
       - name: Every command's --help runs from the installed entry point
         run: |
           uv run ios-homescreen --help > /dev/null
-          for command in read export plan apply restore diff wifi; do
+          for command in read export plan apply restore diff wifi ui; do
             uv run ios-homescreen "$command" --help > /dev/null
           done
+      - name: The wheel carries the browser editor's files
+        run: |
+          uv build --wheel --out-dir dist
+          uv run python - <<'PY'
+          import glob, zipfile
+          names = set(zipfile.ZipFile(glob.glob("dist/*.whl")[0]).namelist())
+          for needed in ("index.html", "app.css", "favicon.png", "logo.png", "js/main.js", "vendor/preact.mjs"):
+              assert f"ios_homescreen/ui/static/{needed}" in names, needed
+          PY

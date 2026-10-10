@@ -15,6 +15,16 @@ from .state import StateError, validate_write_payload
 from .transport import CLOSE_TIMEOUT, Backend, Transport, close_quietly, connect
 
 READ_TIMEOUT = 30.0
+
+# What Installation Proxy is asked for. SBAppTags marks system services that never show
+# on the home screen or in the App Library ("hidden"), such as AirDropUI.
+APP_ATTRIBUTES = [
+    "CFBundleIdentifier",
+    "CFBundleDisplayName",
+    "CFBundleName",
+    "ApplicationType",
+    "SBAppTags",
+]
 SEND_TIMEOUT = 10.0
 REPLY_TIMEOUT = 3.0
 ICON_TIMEOUT = 10.0
@@ -102,25 +112,37 @@ class Device:
         """Format version 3, kept for reference in read snapshots only."""
         return await self._read("3")
 
-    async def installed_apps(self) -> dict[str, dict[str, str]]:
-        """Installed apps that can sit on the home screen: ``ApplicationType`` User or System."""
+    async def installed_apps(self) -> dict[str, dict[str, Any]]:
+        """Installed apps that can sit on the home screen: ``ApplicationType`` User or System.
+
+        Each is ``{"name", "type"}``, plus ``"hidden": True`` for system services that
+        iOS never shows (``SBAppTags`` contains ``hidden``). Hidden apps still have to be
+        listed in a write's ``ignored`` list, but they are not App Library apps.
+        """
         service = self._installer_factory(self.lockdown)
 
-        async def run() -> Mapping[str, Mapping[str, Any]]:
+        async def run() -> Mapping[str, Mapping[str, Any]] | None:
             await service.connect()
             try:
-                return await service.get_apps(application_type="Any")
+                return await service.lookup(
+                    {"ApplicationType": "Any", "ReturnAttributes": APP_ATTRIBUTES}
+                )
             finally:
                 await service.close()
 
         found = await self._timed(run(), self.read_timeout, "Reading the installed apps")
-        apps: dict[str, dict[str, str]] = {}
+        if not isinstance(found, Mapping):
+            raise DeviceError("Installation Proxy returned no app list", code="no_app_list")
+        apps: dict[str, dict[str, Any]] = {}
         for ident, meta in found.items():
             kind = meta.get("ApplicationType")
             if kind not in {"User", "System"}:
                 continue
             name = meta.get("CFBundleDisplayName") or meta.get("CFBundleName") or ident
             apps[ident] = {"name": str(name), "type": str(kind)}
+            tags = meta.get("SBAppTags")
+            if isinstance(tags, list | tuple) and "hidden" in tags:
+                apps[ident]["hidden"] = True
         return apps
 
     async def write_state(self, payload: Any) -> Any | None:

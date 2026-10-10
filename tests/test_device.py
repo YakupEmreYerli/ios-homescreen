@@ -55,8 +55,8 @@ class FakeInstaller:
     async def close(self):
         return None
 
-    async def get_apps(self, application_type="Any"):
-        assert application_type == "Any"
+    async def lookup(self, options):
+        self.options = options
         return self.apps
 
 
@@ -192,20 +192,42 @@ def test_unsafe_payloads_never_reach_the_device(payload):
     assert service.connects == 0
 
 
-def test_installed_apps_keep_user_and_system_only():
+def test_installed_apps_keep_user_and_system_only_and_flag_hidden_services():
     apps = {
         "u": {"CFBundleDisplayName": "User App", "ApplicationType": "User"},
         "s": {"CFBundleName": "System App", "ApplicationType": "System"},
         "e": {"CFBundleDisplayName": "Extension", "ApplicationType": "PluginKitPlugin"},
         "n": {"ApplicationType": "User"},
+        "com.apple.AirDropUI": {
+            "CFBundleName": "AirDropUI",
+            "ApplicationType": "System",
+            "SBAppTags": ["hidden"],
+        },
+        "com.apple.measure": {
+            "CFBundleName": "Measure",
+            "ApplicationType": "System",
+            "SBAppTags": ["arkit"],
+        },
     }
-    device = Device(FakeLockdown(), installer_factory=lambda _: FakeInstaller(apps))
+    installer = FakeInstaller(apps)
+    device = Device(FakeLockdown(), installer_factory=lambda _: installer)
 
     assert run(device.installed_apps()) == {
         "u": {"name": "User App", "type": "User"},
         "s": {"name": "System App", "type": "System"},
         "n": {"name": "n", "type": "User"},
+        "com.apple.AirDropUI": {"name": "AirDropUI", "type": "System", "hidden": True},
+        "com.apple.measure": {"name": "Measure", "type": "System"},
     }
+    assert installer.options["ApplicationType"] == "Any"
+    assert "SBAppTags" in installer.options["ReturnAttributes"]
+
+
+def test_a_missing_app_list_is_an_error():
+    device = Device(FakeLockdown(), installer_factory=lambda _: FakeInstaller(None))
+
+    with pytest.raises(DeviceError, match="no app list"):
+        run(device.installed_apps())
 
 
 def test_icons_use_one_connection_and_return_none_when_missing():

@@ -1,0 +1,25 @@
+Third-party files in this directory, copied unmodified from the npm registry
+(only renamed). They are loaded by the browser UI through the import map in
+../index.html. There is no build step.
+
+preact.mjs
+  from:    preact 11.0.1, package/dist/preact.mjs
+  tarball: https://registry.npmjs.org/preact/-/preact-11.0.1.tgz
+  license: MIT, see LICENSE-preact.txt
+  sha256:  3a3201e9ccef7d30ef1273427f1b17ef8323e464b2c8d73b4fd5636af730433e
+
+preact-hooks.mjs
+  from:    preact 11.0.1, package/hooks/dist/hooks.mjs
+  tarball: https://registry.npmjs.org/preact/-/preact-11.0.1.tgz
+  license: MIT, see LICENSE-preact.txt
+  sha256:  6cb79fe9959ad185b8b86134aff47c12fd20216b24837597b19be59a133d9947
+
+htm.mjs
+  from:    htm 3.1.1, package/dist/htm.module.js
+  tarball: https://registry.npmjs.org/htm/-/htm-3.1.1.tgz
+  license: Apache-2.0, see LICENSE-htm.txt
+  sha256:  ab33dd3f38059b9be4d5f5350128eefb2356639c4e0bbe9d9e8b3ba75847e9e4
+
+To update: `npm pack preact@VERSION htm@VERSION` in an empty directory, unpack,
+copy the files above, and update the versions and checksums here
+(`sha256sum *.mjs`). tests/test_ui_static.py checks the checksums.

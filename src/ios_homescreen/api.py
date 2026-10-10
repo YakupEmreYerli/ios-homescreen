@@ -28,7 +28,7 @@ from .device import Device, DeviceError, open_device
 from .events import Event, EventSink, ignore
 from .export import export_layout
 from .icons import IconCache, load_icons
-from .model import describe, to_document
+from .model import describe, describe_changes, to_document
 from .paths import cache_dir, data_dir
 from .planner import LayoutError, LayoutIssue, Plan, load_layout, plan_layout
 from .report import read_summary
@@ -75,6 +75,7 @@ __all__ = [
     "connect",
     "data_dir",
     "describe",
+    "describe_changes",
     "export_layout",
     "fetch_icons",
     "load_backup",

@@ -51,6 +51,13 @@ def non_negative_number(text: str) -> float:
     return value
 
 
+def port_number(text: str) -> int:
+    value = int(text)
+    if not 0 <= value <= 65535:
+        raise argparse.ArgumentTypeError("must be between 0 and 65535")
+    return value
+
+
 def positive_integer(text: str) -> int:
     value = int(text)
     if value < 1:
@@ -72,6 +79,54 @@ restored; 4 the restore did not verify either (the backup file is kept).
 Data directory: {data_dir}
 (override with --data-dir or ${env})
 """
+
+
+def _writing_options(*, confirm: bool) -> argparse.ArgumentParser:
+    """Write options; ``--yes`` only where the command line is the confirmation."""
+    writing = argparse.ArgumentParser(add_help=False)
+    defaults = Timing()
+    group = writing.add_argument_group("writing")
+    if confirm:
+        group.add_argument(
+            "--yes",
+            action="store_true",
+            help="confirm the write; without it the device is not contacted at all",
+        )
+    group.add_argument(
+        "--backup-dir",
+        type=Path,
+        metavar="DIR",
+        help="where the automatic backup is saved (default: DATA_DIR/backups)",
+    )
+    group.add_argument(
+        "--verify-attempts",
+        type=positive_integer,
+        default=defaults.verify_attempts,
+        metavar="N",
+        help="re-reads used to verify a write before rolling back (default: %(default)s)",
+    )
+    group.add_argument(
+        "--verify-interval",
+        type=non_negative_number,
+        default=defaults.verify_interval,
+        metavar="SECONDS",
+        help="pause between verification re-reads (default: %(default)g)",
+    )
+    group.add_argument(
+        "--write-timeout",
+        type=positive_number,
+        default=defaults.write_timeout,
+        metavar="SECONDS",
+        help="time limit for sending the layout (default: %(default)g)",
+    )
+    group.add_argument(
+        "--read-timeout",
+        type=positive_number,
+        default=defaults.read_timeout,
+        metavar="SECONDS",
+        help="time limit for each read (default: %(default)g)",
+    )
+    return writing
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -124,48 +179,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="time limit for opening the connection (default: %(default)g)",
     )
 
-    writing = argparse.ArgumentParser(add_help=False)
-    defaults = Timing()
-    group = writing.add_argument_group("writing")
-    group.add_argument(
-        "--yes",
-        action="store_true",
-        help="confirm the write; without it the device is not contacted at all",
-    )
-    group.add_argument(
-        "--backup-dir",
-        type=Path,
-        metavar="DIR",
-        help="where the automatic backup is saved (default: DATA_DIR/backups)",
-    )
-    group.add_argument(
-        "--verify-attempts",
-        type=positive_integer,
-        default=defaults.verify_attempts,
-        metavar="N",
-        help="re-reads used to verify a write before rolling back (default: %(default)s)",
-    )
-    group.add_argument(
-        "--verify-interval",
-        type=non_negative_number,
-        default=defaults.verify_interval,
-        metavar="SECONDS",
-        help="pause between verification re-reads (default: %(default)g)",
-    )
-    group.add_argument(
-        "--write-timeout",
-        type=positive_number,
-        default=defaults.write_timeout,
-        metavar="SECONDS",
-        help="time limit for sending the layout (default: %(default)g)",
-    )
-    group.add_argument(
-        "--read-timeout",
-        type=positive_number,
-        default=defaults.read_timeout,
-        metavar="SECONDS",
-        help="time limit for each read (default: %(default)g)",
-    )
+    writing = _writing_options(confirm=True)
+    ui_writing = _writing_options(confirm=False)
 
     read = commands.add_parser(
         "read",
@@ -291,6 +306,35 @@ def build_parser() -> argparse.ArgumentParser:
         help="with disable: also delete this computer's Wi-Fi pairing with the phone",
     )
 
+    ui = commands.add_parser(
+        "ui",
+        parents=[storage, connection, ui_writing],
+        help="edit the home screen in your browser",
+        description=(
+            "Start a local editor on 127.0.0.1 and open it in the browser: drag apps, "
+            "folders and widgets around, see what will change, and apply it with the same "
+            "backup, verification and rollback as 'apply'. The address printed at start "
+            "contains a key that changes on every run. Needs the 'ui' extra."
+        ),
+    )
+    group = ui.add_argument_group("browser UI")
+    group.add_argument(
+        "--port",
+        type=port_number,
+        default=0,
+        metavar="PORT",
+        help="port on 127.0.0.1 (default: any free port)",
+    )
+    group.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="only print the address; do not open a browser",
+    )
+    group.add_argument(
+        "--demo",
+        action="store_true",
+        help="try the editor on a pretend iPhone; nothing connects to a phone",
+    )
     return parser
 
 
@@ -482,6 +526,25 @@ async def _wifi(args: argparse.Namespace, opener: Opener, backend: Any) -> int:
     return EXIT_OK
 
 
+def _ui(args: argparse.Namespace) -> int:
+    from .ui import Options, UIUnavailable, serve
+
+    options = Options(
+        transport=_transport(args),
+        data_dir=_data_dir(args),
+        backup_dir=args.backup_dir or _data_dir(args) / BACKUPS,
+        timing=_timing(args),
+        port=args.port,
+        open_browser=not args.no_browser,
+        demo=args.demo,
+    )
+    try:
+        return serve(options, say=say)
+    except UIUnavailable as exc:
+        print(f"error: {exc}", file=sys.stderr, flush=True)
+        return EXIT_ERROR
+
+
 def _run(args: argparse.Namespace, opener: Opener, backend: Any = None) -> int:
     if args.command == "read":
         return asyncio.run(_read(args, opener))
@@ -504,6 +567,8 @@ def _run(args: argparse.Namespace, opener: Opener, backend: Any = None) -> int:
         return _diff(args)
     if args.command == "wifi":
         return asyncio.run(_wifi(args, opener, backend))
+    if args.command == "ui":
+        return _ui(args)
     raise AssertionError(f"unhandled command {args.command!r}")
 
 

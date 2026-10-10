@@ -148,3 +148,143 @@ def to_document(layout: Mapping[str, Any]) -> dict[str, Any]:
             for page in (pages if isinstance(pages, list) else [])
         ],
     }
+
+
+# --------------------------------------------------------------------------- changes
+
+_SPECIAL_KINDS = frozenset({"widget", "webclip", "webapp"})
+
+
+def _view_pages(layout: Mapping[str, Any]) -> list[list[Any]]:
+    pages = layout.get("pages", [])
+    if not isinstance(pages, list):
+        return []
+    return [list(_page_items(page) or []) for page in pages]
+
+
+def _placements(layout: Mapping[str, Any]) -> tuple[dict[str, dict[str, Any]], dict[str, list]]:
+    """Where every item of a view is: ``{id: placement}`` and ``{container: [ids]}``.
+
+    A container is the dock, one page, or one folder (all of its pages in order).
+    Empty pages are skipped, so page numbers match what gets written.
+    """
+    places: dict[str, dict[str, Any]] = {}
+    containers: dict[str, list[str]] = {}
+
+    def walk(items: list[Any], where: dict[str, Any], key: str) -> None:
+        for item in items:
+            if not isinstance(item, Mapping) or not isinstance(item.get("id"), str):
+                continue
+            ident = item["id"]
+            containers.setdefault(key, []).append(ident)
+            places[ident] = {
+                "item": item,
+                "where": {**where, "index": len(containers[key])},
+                "container": key,
+            }
+            if item.get("type") == "folder":
+                inner = {**where, "folder": str(item.get("name", "")), "folder_id": ident}
+                for folder_page in item.get("pages", []) or []:
+                    walk(list(folder_page or []), inner, f"folder:{ident}")
+
+    walk(list(layout.get("dock", []) or []), {"section": "dock"}, "dock")
+    page_no = 0
+    for page in _view_pages(layout):
+        if not page:
+            continue
+        page_no += 1
+        walk(page, {"section": "page", "page": page_no}, f"page:{page_no}")
+    return places, containers
+
+
+def _kept_in_order(before: list[str], after: list[str]) -> set[str]:
+    """Ids that keep their relative order (a longest common subsequence)."""
+    if not before or not after:
+        return set()
+    rows, cols = len(before), len(after)
+    table = [[0] * (cols + 1) for _ in range(rows + 1)]
+    for i in range(rows - 1, -1, -1):
+        for j in range(cols - 1, -1, -1):
+            table[i][j] = (
+                table[i + 1][j + 1] + 1
+                if before[i] == after[j]
+                else max(table[i + 1][j], table[i][j + 1])
+            )
+    kept, i, j = set(), 0, 0
+    while i < rows and j < cols:
+        if before[i] == after[j]:
+            kept.add(before[i])
+            i, j = i + 1, j + 1
+        elif table[i + 1][j] >= table[i][j + 1]:
+            i += 1
+        else:
+            j += 1
+    return kept
+
+
+def _subject(item: Mapping[str, Any]) -> dict[str, Any]:
+    return {"id": item["id"], "type": item.get("type", "app"), "name": str(item.get("name", ""))}
+
+
+def describe_changes(before: Mapping[str, Any], after: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """What changes between two :func:`describe` views (``after`` is usually edited).
+
+    Each change is a dict with a ``kind`` and the item's ``id``, ``type`` and ``name``:
+    ``added`` (from the App Library), ``moved`` (to another place), ``reordered``
+    (same place, new order), ``to_library``, ``removed`` (a widget, web clip or web app
+    that will be gone), ``folder_created``, ``folder_renamed``, ``folder_deleted``, and
+    ``pages`` when the number of pages changes. ``from`` and ``to`` say where, with
+    1-based ``page`` and ``index`` and the folder's ``name`` when inside one. Folders
+    are matched by ``id``; folders a client creates need ids of their own.
+    """
+    old, old_containers = _placements(before)
+    new, new_containers = _placements(after)
+    in_order = {
+        key: _kept_in_order(
+            [i for i in old_containers.get(key, []) if new.get(i, {}).get("container") == key],
+            [i for i in ids if old.get(i, {}).get("container") == key],
+        )
+        for key, ids in new_containers.items()
+    }
+    placed: list[dict[str, Any]] = []
+    later: list[dict[str, Any]] = []
+    for ident, now in new.items():
+        item = now["item"]
+        was = old.get(ident)
+        is_folder = item.get("type") == "folder"
+        if was is None:
+            kind = "folder_created" if is_folder else "added"
+            placed.append({"kind": kind, **_subject(item), "to": now["where"]})
+            continue
+        if was["container"] != now["container"]:
+            placed.append(
+                {"kind": "moved", **_subject(item), "from": was["where"], "to": now["where"]}
+            )
+        elif ident not in in_order.get(now["container"], set()):
+            placed.append(
+                {"kind": "reordered", **_subject(item), "from": was["where"], "to": now["where"]}
+            )
+        if is_folder and str(was["item"].get("name", "")) != str(item.get("name", "")):
+            later.append(
+                {
+                    "kind": "folder_renamed",
+                    **_subject(item),
+                    "old_name": str(was["item"].get("name", "")),
+                }
+            )
+    for ident, was in old.items():
+        if ident in new:
+            continue
+        item = was["item"]
+        kind = item.get("type", "app")
+        if kind == "folder":
+            later.append({"kind": "folder_deleted", **_subject(item), "from": was["where"]})
+        elif kind in _SPECIAL_KINDS:
+            later.append({"kind": "removed", **_subject(item), "from": was["where"]})
+        else:
+            later.append({"kind": "to_library", **_subject(item), "from": was["where"]})
+    pages_before = sum(1 for page in _view_pages(before) if page)
+    pages_after = sum(1 for page in _view_pages(after) if page)
+    if pages_before != pages_after:
+        later.append({"kind": "pages", "before": pages_before, "after": pages_after})
+    return placed + later

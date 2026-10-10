@@ -31,7 +31,7 @@ def phone(**kwargs) -> FakeSpringBoard:
     return FakeSpringBoard(samples.home_screen(), samples.installed_apps(), **kwargs)
 
 
-COMMANDS = ["read", "export", "plan", "apply", "restore", "diff", "wifi"]
+COMMANDS = ["read", "export", "plan", "apply", "restore", "diff", "wifi", "ui"]
 
 
 @pytest.mark.parametrize("argv", [["--help"], *([c, "--help"] for c in COMMANDS)])
@@ -44,7 +44,7 @@ def test_every_help_page_works(argv, capsys):
     assert text.startswith("usage: ios-homescreen")
 
 
-@pytest.mark.parametrize("command", ["read", "apply", "restore", "wifi"])
+@pytest.mark.parametrize("command", ["read", "apply", "restore", "wifi", "ui"])
 def test_device_commands_offer_usb_and_wifi_options(command, capsys):
     with pytest.raises(SystemExit):
         main([command, "--help"])

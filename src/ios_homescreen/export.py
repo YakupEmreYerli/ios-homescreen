@@ -22,8 +22,9 @@ HEADER = """\
 #
 # Items are in home screen order: left to right, top to bottom.
 # Apps: "bundle.id" or the app's name. Apps you leave out move to the App Library.
-# Widgets, web clips and Safari web apps can be moved or removed, not created;
-# they are referenced by the id they had in the read.
+# Widgets, web clips and Safari web apps are referenced by the id they had in the
+# read. They can be moved, not created; widgets can also be removed (plan
+# --allow-removal), web clips and web apps only on the phone.
 # Folders: { type = "folder", name = "...", items = [...] }, or pages = [[...], [...]]
 # for a folder with several pages. Folders hold apps, web clips and web apps.
 # Limits: dock 4 items. A page has 24 cells: an app, folder, web clip or web app

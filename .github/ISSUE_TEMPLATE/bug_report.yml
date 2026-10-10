@@ -29,8 +29,7 @@ body:
       label: Connection
       options:
         - USB
-        - Wi-Fi (--wifi, Bonjour discovery)
-        - Wi-Fi (--host)
+        - Wi-Fi (--wifi)
     validations:
       required: true
   - type: input

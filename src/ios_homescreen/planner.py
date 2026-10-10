@@ -29,6 +29,7 @@ from .state import (
     fingerprint,
     folder_pages,
     is_folder,
+    is_hidden_app,
     item_id,
     item_kind,
     iter_items,
@@ -187,7 +188,9 @@ class _Resolver:
                 self.names[str(item["displayName"])].add(ident)
         for ident, meta in self.installed.items():
             name = _app_name(meta)
-            if name:
+            # Hidden system services are not offered by name (they share names like
+            # "Settings" with real apps); their bundle id still works.
+            if name and not is_hidden_app(meta):
                 self.names[name].add(ident)
 
     def _is_app_id(self, ident: str) -> bool:

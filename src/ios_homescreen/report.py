@@ -10,6 +10,7 @@ from .state import (
     counts_for_home_screen,
     folder_pages,
     is_folder,
+    is_hidden_app,
     item_id,
     item_kind,
     item_name,
@@ -25,10 +26,15 @@ def _app_meta(meta: Any, key: str, fallback: str) -> str:
 
 
 def library_apps(state: Any, apps: Mapping[str, Any]) -> list[str]:
-    """Installed User/System apps that are not on the home screen (App Library only)."""
+    """Installed User/System apps that are not on the home screen (App Library only).
+
+    Hidden system services are left out: iOS shows them nowhere.
+    """
     shown = visible_apps(state)
     return sorted(
-        ident for ident, meta in apps.items() if ident not in shown and counts_for_home_screen(meta)
+        ident
+        for ident, meta in apps.items()
+        if ident not in shown and counts_for_home_screen(meta) and not is_hidden_app(meta)
     )
 
 

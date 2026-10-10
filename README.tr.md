@@ -12,13 +12,16 @@ iPhone ana ekranını Linux'tan okuyun, yeni düzeni bir metin dosyasında planl
 
 <p align="center"><a href="README.md">English</a></p>
 
-![ios-homescreen](docs/assets/banner.png)
+![ios-homescreen](docs/assets/banner.tr.png)
 
 Onlarca simgeyi telefonda tek tek sürükleyerek yerleştirmek uzun sürüyor. ios-homescreen
 mevcut düzeni bilgisayara kaydeder, istediğiniz metin düzenleyicide değiştirebileceğiniz bir
 TOML dosyasına çevirir, yaptığınız değişiklikleri telefona dokunmadan denetler ve sonucu
 telefona yazar. Her yazmadan önce yedek alır, telefonu yeniden okuyarak sonucu doğrular;
 telefon istediğiniz düzene gelmediyse yedeği kendiliğinden geri yazar.
+
+Simgeleri sürükleyerek çalışmayı seviyorsanız `ios-homescreen ui` aynı işi tarayıcıda açılan
+bir düzenleyiciyle yapar.
 
 ## Özellikler
 
@@ -37,6 +40,10 @@ telefon istediğiniz düzene gelmediyse yedeği kendiliğinden geri yazar.
   İkisi için de root ya da Geliştirici Modu gerekmez.
 - Okumaları, yedekleri ve planları çalışma klasörüne değil `~/.local/share/ios-homescreen`
   altına kaydeder.
+- Tarayıcıda çalışan bir düzenleyicisi var (`ios-homescreen ui`): uygulamaları, klasörleri ve
+  widget'ları ana ekranın resmi üzerinde sürüklersiniz, her değişikliği telefona yazılmadan önce
+  görürsünüz, aynı güvenlik adımlarıyla uygularsınız. Telefon olmadan denemek için bir demo
+  modu da var.
 - Python'dan da kullanılabilir: komut satırı, `ios_homescreen.api` üzerine ince bir katman.
 
 ## Gereksinimler
@@ -60,6 +67,13 @@ uv tool install git+https://github.com/YakupEmreYerli/ios-homescreen
 
 ```bash
 pipx install git+https://github.com/YakupEmreYerli/ios-homescreen
+```
+
+Tarayıcı düzenleyicisi Starlette ve uvicorn kullanır; ikisi de pymobiledevice3 ile zaten
+kurulur. `ui` eki bunları ayrıca adıyla ister, ileride değişirse diye:
+
+```bash
+uv tool install "ios-homescreen[ui] @ git+https://github.com/YakupEmreYerli/ios-homescreen"
 ```
 
 Geliştirmek için depodan:
@@ -105,12 +119,13 @@ ios-homescreen restore ~/.local/share/ios-homescreen/backups/backup-20261010-101
 | `restore BACKUP --yes` | Bir yedeği ya da okumayı aynı güvenlik adımlarıyla geri yazar | Yazar |
 | `diff BEFORE AFTER` | Kayıtlı iki düzeni karşılaştırır (okuma, yedek, plan ya da plist/JSON döküm) | Hayır |
 | `wifi status\|enable\|disable` | Telefona Wi-Fi erişimini kurar, denetler ya da kapatır | Evet |
+| `ui` | Tarayıcı düzenleyicisini 127.0.0.1 üzerinde açar | Okur; yalnız Uygula'ya basınca yazar |
 
 `export` ve `plan` için `-o/--output FILE`; `plan` için ayrıca `--allow-removal` (düzen dosyası
 bölümüne bakın). `read` için `-o/--output DIR`. `apply` için `--force` (güvenlik bölümüne bakın).
 `diff` ve `wifi` dışındaki bütün komutlar `--data-dir DIR` alır.
 
-Bağlantı seçenekleri (`read`, `apply`, `restore`, `wifi`):
+Bağlantı seçenekleri (`read`, `apply`, `restore`, `wifi`, `ui`):
 
 | Seçenek | Anlamı |
 | --- | --- |
@@ -120,7 +135,7 @@ Bağlantı seçenekleri (`read`, `apply`, `restore`, `wifi`):
 | `--discovery-timeout SECONDS` | Bonjour cevaplarının bekleneceği süre (varsayılan 5) |
 | `--connect-timeout SECONDS` | Bağlantı kurma süre sınırı (varsayılan 30) |
 
-Yazma seçenekleri (`apply`, `restore`):
+Yazma seçenekleri (`apply`, `restore`; `--yes` dışındakiler `ui` için de geçerli):
 
 | Seçenek | Anlamı |
 | --- | --- |
@@ -194,6 +209,43 @@ Planlayıcının uyguladığı kurallar:
 `plan` bulduğu her sorunu yeriyle birlikte yazar, örneğin
 `page 2, item 5: unknown app 'Mpas'`.
 
+## Tarayıcı düzenleyicisi
+
+![Demo modunda tarayıcı düzenleyicisi](docs/assets/ui.png)
+
+`ios-homescreen ui` telefonu okur ve tarayıcıda bir düzenleyici açar. Uygulamaları, klasörleri
+ve widget'ları ana ekranın resmi üzerinde, sayfalar arasında ve dock'a sürükleyebilirsiniz. Bir
+uygulamayı ötekinin üstüne bırakınca klasör olur; klasöre tıklayınca açılır, adını orada
+değiştirir, içine uygulama atar ya da çıkarırsınız. Soldaki Uygulama Arşivi, kurulu olup ana
+ekranda olmayan uygulamaları gösterir: oradan ana ekrana sürükleyin ya da ana ekrandan kaldırmak
+istediklerinizi oraya bırakın. Sağ tarafta son okumaya göre değişen her şey listelenir; düzen
+siz çalışırken `plan` ile aynı kurallarla denetlenir.
+
+Uygula önce onay ister, sonra `apply` ile aynı adımlardan geçer: yedek, yazma, geri okuma,
+tutmazsa geri dönüş. İlerleme ve sonuç sayfada görünür. Yedekler, otomatik alınan yedekleri
+listeler ve birini aynı yolla geri yükler. İçe ve Dışa Aktar TOML düzen dosyasını yükler ve
+kaydeder; düzenleyiciyle metin düzenleyicisi arasında gidip gelebilirsiniz.
+
+```bash
+ios-homescreen ui              # USB ile; Wi-Fi için --wifi ekleyin
+ios-homescreen ui --demo       # uydurma uygulamalı bir deneme iPhone'u
+```
+
+| Seçenek | Anlamı |
+| --- | --- |
+| `--port PORT` | 127.0.0.1 üzerindeki port (varsayılan: boş herhangi bir port) |
+| `--no-browser` | Yalnız adresi yazar, tarayıcı açmaz |
+| `--demo` | Deneme iPhone'u kullanır; hiçbir telefona bağlanmaz, okumalar, yedekler ve planlar geçici bir klasöre gider |
+
+Bağlantı ve yazma seçenekleri `apply` komutundaki gibi çalışır. `--yes` gerekmez, düzenleyici
+kendisi sorar.
+
+Düzenleyici yalnız 127.0.0.1'i dinler. Yazdığı adreste her açılışta değişen bir anahtar var;
+sayfa bu anahtarı bir çereze çevirir. Her istek anahtarı taşımalı ve sayfanın kendisinden
+gelmeli. Böylece aynı tarayıcıda açık başka siteler düzenleyiciyi kullanamaz, simgelerinizi ve
+yedeklerinizi göremez. Bir widget'ı kaldırmak, `--allow-removal` gibi ayrı bir onay ister.
+Ctrl+Z geri alır, Ctrl+Shift+Z yineler.
+
 ## Güvenlik modeli
 
 Ana ekran protokolü belgelenmemiş. Araç yazılırken iki davranışı gerçek bir telefonda düzeni
@@ -239,7 +291,7 @@ RemotePairing ile eşler; Xcode kablosuz cihazlar için aynı yolu kullanır. Bi
 ayrı bir tünel servisi gerekmez: bağlantı, pymobiledevice3'ün ios-homescreen sürecinin içinde
 çalışan ağ yığınından geçer.
 
-Bundan sonra `read`, `apply` ya da `restore` komutuna `--wifi` ekleyin. Telefon
+Bundan sonra `read`, `apply`, `restore` ya da `ui` komutuna `--wifi` ekleyin. Telefon
 bilgisayarla aynı ağda, uyanık ve kilidi açık olmalı. ios-homescreen telefonu
 `--discovery-timeout` saniye boyunca Bonjour ile (`_remotepairing._tcp`) arar ve adresinden
 değil eşleşmeden tanır; iOS özel ve değişen Wi-Fi adresleri kullanıyor. Bilgisayar birden çok
@@ -259,7 +311,7 @@ her servisi kapatıyor.
 | Ne | Varsayılan | Değiştirmek için |
 | --- | --- | --- |
 | Okumalar, yedekler, planlar | `$XDG_DATA_HOME/ios-homescreen` ya da `~/.local/share/ios-homescreen` | `--data-dir`, `IOS_HOMESCREEN_DATA_DIR` |
-| Uygulama simgesi önbelleği (Python API) | `$XDG_CACHE_HOME/ios-homescreen` ya da `~/.cache/ios-homescreen` | `IOS_HOMESCREEN_CACHE_DIR` |
+| Uygulama simgesi önbelleği (tarayıcı düzenleyicisi, Python API) | `$XDG_CACHE_HOME/ios-homescreen` ya da `~/.cache/ios-homescreen` | `IOS_HOMESCREEN_CACHE_DIR` |
 | Wi-Fi eşleşmesi (pymobiledevice3) | `$XDG_DATA_HOME/pymobiledevice3` ya da `~/.local/share/pymobiledevice3` | `XDG_DATA_HOME` |
 
 Veri klasöründe `reads/read-*.plist` (her birinin yanında `.txt` özeti),
@@ -295,7 +347,8 @@ asyncio.run(main())
 
 İlerleme, değişmeyen bir `code` alanı taşıyan `Event` nesneleriyle gelir. Sonuçların ve
 hataların `to_dict()` metodu ve makinenin okuyabileceği kodları var. `api.fetch_icons`
-uygulama simgelerini PNG baytları olarak döndürür.
+uygulama simgelerini PNG baytları olarak döndürür, `api.describe_changes(before, after)` iki
+görünüm arasındaki farkları listeler.
 
 ## Sınırlar
 
@@ -308,6 +361,7 @@ uygulama simgelerini PNG baytları olarak döndürür.
   widget) varsayılan seçime dönebilir: SpringBoard yazma sırasında bu seçimi bırakıyor (iOS 27'de
   görüldü). Yazmadan sonraki denetim de bu yüzden bu seçime bakmaz.
 - Wi-Fi için iOS 17 ya da sonrası gerekir.
+- Boş sayfalar yazılmaz; SpringBoard onları tutmuyor.
 - Sayfa kapasitesi iPhone ızgarasına (6'ya 4) göre hesaplanır. iPad'de denenmedi.
 - Düzen biçimi Apple'ın ve belgelenmemiş; bir iOS güncellemesi onu değiştirebilir.
   Güncellemeden sonra önce `read` çalıştırın; biçim değişirse yedek ve geri dönüş bunun için var.
@@ -333,6 +387,9 @@ duvarı mDNS'e (UDP 5353) izin vermeli.
 `this computer has no Wi-Fi pairing yet` ya da eski bir pymobiledevice3 sürümünün yaptığı
 eşleşme: USB üzerinden `wifi enable` komutunu yeniden çalıştırın.
 
+Tarayıcı, sayfanın terminaldeki adresi istediğini söylüyor: `ios-homescreen ui` komutunun
+yazdığı adresin tamamını açın. İçindeki anahtar düzenleyici her açıldığında değişir.
+
 `the device layout changed since the read`: `read` komutundan sonra telefonda düzen değişmiş.
 Yeniden `read` ve `plan` çalıştırın; eminseniz `--force` kullanın.
 
@@ -355,8 +412,15 @@ projesinin 4 numaralı çekme isteğinin `setIconState` hakkında bulduklarına 
 Cihazla iletişim [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) (Wi-Fi için
 RemotePairing desteği ve kullanıcı alanındaki tüneli dahil), USB erişimi libimobiledevice
 projesinin [usbmuxd](https://github.com/libimobiledevice/usbmuxd) aracı üzerinden yürüyor.
+Tarayıcı düzenleyicisi [Preact](https://preactjs.com) ve [htm](https://github.com/developit/htm)
+ile yazıldı, [Starlette](https://www.starlette.io) ve [uvicorn](https://www.uvicorn.org) ile
+sunuluyor.
 
 ## Lisans
 
 [MIT](LICENSE). ios-homescreen, GPL-3.0-or-later lisanslı pymobiledevice3'e bağımlıdır; ikisini
-tek bir program olarak birlikte dağıtırsanız bu birleşim GPL kapsamına girer.
+tek bir program olarak birlikte dağıtırsanız bu birleşim GPL kapsamına girer. Tarayıcı
+düzenleyicisi Preact (MIT) ve htm (Apache-2.0) kütüphanelerinin ve IBM Plex Sans yazı tipinin
+(SIL Open Font License 1.1) değiştirilmemiş kopyalarını içerir; lisansları yanlarında,
+[`src/ios_homescreen/ui/static/vendor`](src/ios_homescreen/ui/static/vendor) ve
+[`src/ios_homescreen/ui/static/fonts`](src/ios_homescreen/ui/static/fonts) klasörlerinde.

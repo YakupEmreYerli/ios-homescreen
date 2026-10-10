@@ -23,6 +23,8 @@ uv run pytest
 CI runs the tests on Python 3.11, 3.12 and 3.13. To try another version locally:
 `uv run --python 3.11 pytest`.
 
+To try the browser editor without a phone: `uv run ios-homescreen ui --demo`.
+
 ## Layout of the code
 
 | Module | Role |
@@ -30,14 +32,43 @@ CI runs the tests on Python 3.11, 3.12 and 3.13. To try another version locally:
 | `state.py` | Icon state: plist storage, item kinds and ids, cell counts, comparison, the safe payload, validation |
 | `planner.py` | TOML or JSON layout to plan payload; collects every problem with a code and a location |
 | `export.py` | Read snapshot to an editable TOML layout |
-| `model.py` | JSON view of a read for a UI, and back to a layout document |
+| `model.py` | JSON view of a read for a UI, back to a layout document, and the change list between two views |
 | `workflow.py` | Backup, drift check, timed write, verify by re-reading, rollback |
 | `device.py` | The only code that talks to SpringBoard and Installation Proxy; every call has a time limit |
 | `transport.py` | USB connection, or Wi-Fi through RemotePairing and pymobiledevice3's userspace tunnel |
 | `api.py` | The Python API; no printing, progress through `Event` callbacks |
 | `cli.py` | argparse and printing on top of `api.py` |
+| `ui/` | The browser editor: `session.py` (jobs, icons, planning), `app.py` (HTTP API), `security.py` (token, Host and Origin checks), `demo.py` (the pretend phone), `static/` (the page) |
 
 The core never prints. If you need to report progress, emit an `Event` with a stable `code`.
+
+## The browser editor
+
+The page is plain JavaScript modules in `src/ios_homescreen/ui/static/js`, written with
+[Preact](https://preactjs.com) and [htm](https://github.com/developit/htm) (tagged templates
+instead of JSX). There is no build step and no Node.js: the browser loads the modules as they
+are, and the wheel ships them as package data. Edit a file, reload the page.
+
+- `actions.js` holds every action (edits with undo/redo, validation, device jobs);
+  `ops.js` the pure edits on a draft layout; `layout.js` the phone geometry and how items
+  flow into the 4 x 6 grid; `drag.js` the pointer-based drag and drop; `preview.js` what the
+  phone shows while dragging, so the preview and the drop use the same code.
+- The server is the only judge of a layout: after each edit the page sends it to
+  `POST /api/plan`, which runs the real planner and returns issues with their codes and the
+  change list (`model.describe_changes`). The page only refuses drops that cannot be shown,
+  like a fifth dock item.
+- `static/vendor` holds unmodified copies of Preact and htm, with their licenses and
+  `SOURCES.txt` (versions, URLs, SHA-256). To update them, run `npm pack preact@VERSION
+  htm@VERSION` in an empty directory, unpack, copy the files listed in `SOURCES.txt`, and
+  update the versions and checksums there; `tests/test_ui_parts.py` checks them.
+- `static/fonts` holds IBM Plex Sans (latin and latin-ext, three weights) with its OFL license
+  and checksums; update it the same way from `@fontsource/ibm-plex-sans`.
+- Keep the Content Security Policy intact: no inline scripts or styles in `index.html`
+  (the import map is allowed by its hash, computed at start), no `eval`.
+- Keep the look plain: flat colours, no gradients, blur or text shadows, and motion only
+  where it answers the user (drag, reflow, folder open, progress). `test_the_editor_stays_flat`
+  checks the first part.
+- Check UI changes in a real browser, in demo mode, and at a narrow window width.
 
 ## Tests
 
@@ -50,6 +81,8 @@ No test may talk to a real device, usbmuxd or the network. Device behaviour is s
   placeholders. Never commit data read from your own phone, not even as a fixture.
 - `FakeWifiBackend` in `tests/fakes.py` stands in for the USB lockdown, the RemotePairing
   records, the network lookup and the Wi-Fi tunnel.
+- `tests/test_ui_server.py` drives the browser editor's HTTP API with Starlette's test client
+  against the fakes, including the security checks.
 - `tests/test_pymobiledevice3_contract.py` checks the pymobiledevice3 functions we rely on
   (imports only).
 
@@ -64,6 +97,9 @@ alternative on a device.
 - `ignored` must contain every installed User and System app that is not on the home screen.
   User apps alone are not enough: Apple's stock apps come back. Installation Proxy's
   `ApplicationType` tells them apart; plugins and other types are left out.
+- About 200 of the System apps are hidden services (AirDropUI, AccountAuthenticationDialog and
+  the like): Installation Proxy tags them with `hidden` in `SBAppTags`. They still belong in
+  `ignored`, but they are not App Library apps and are not offered by name.
 - Recompute `ignored` at write time from the apps installed then. Apps get installed and
   deleted between a read and a write.
 - Folders are written as `{"listType": "folder", "displayName", "iconLists": [[...]]}`. A
