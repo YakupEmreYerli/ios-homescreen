@@ -12,7 +12,7 @@ iPhone ana ekranını Linux'tan düzenleyin: gerçek simgeleri tarayıcıda sür
 
 <p align="center"><a href="README.md">English</a></p>
 
-![ios-homescreen](docs/assets/banner.tr.png)
+![ios-homescreen: iPhone ana ekranını Linux'tan düzenle, USB ya da Wi-Fi ile; yanında tarayıcı düzenleyicisi ve telefonun aynası](docs/banner.tr.png)
 
 Onlarca simgeyi telefonda tek tek sürükleyerek yerleştirmek uzun sürüyor. ios-homescreen
 bunun için iki kolay yol sunar:

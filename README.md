@@ -12,7 +12,7 @@ Rearrange your iPhone home screen from Linux: drag your real icons around in the
 
 <p align="center"><a href="README.tr.md">Türkçe</a></p>
 
-![ios-homescreen](docs/assets/banner.png)
+![ios-homescreen: rearrange your iPhone home screen from Linux, over USB or Wi-Fi, next to the browser editor and its mirror of the phone](docs/banner.en.png)
 
 Rearranging dozens of icons by dragging them around on the phone is slow. ios-homescreen
 gives you two easier ways:
