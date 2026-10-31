@@ -65,6 +65,7 @@ IPHONE_NAMES = {
     "iPhone18,2": "iPhone 17 Pro Max",
     "iPhone18,3": "iPhone 17",
     "iPhone18,4": "iPhone Air",
+    "iPhone19,4": "iPhone Duo",
 }
 
 # pymobiledevice3 calls that write the list form of the layout back, which is how the

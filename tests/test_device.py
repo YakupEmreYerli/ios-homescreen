@@ -304,7 +304,12 @@ def test_the_model_is_the_name_the_connection_reported():
 
 @pytest.mark.parametrize(
     ("product", "name"),
-    [("iPhone15,4", "iPhone 15"), ("iPhone18,4", "iPhone Air"), ("iPhone99,1", "iPhone99,1")],
+    [
+        ("iPhone15,4", "iPhone 15"),
+        ("iPhone18,4", "iPhone Air"),
+        ("iPhone19,4", "iPhone Duo"),
+        ("iPhone99,1", "iPhone99,1"),
+    ],
 )
 def test_without_a_name_a_table_names_recent_iphones(product, name):
     lockdown = NamelessLockdown()
