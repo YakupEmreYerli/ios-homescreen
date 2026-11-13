@@ -113,6 +113,19 @@ def is_webapp(item: Any) -> bool:
     return bundle is not None and display is not None and display != bundle
 
 
+SAFARI = "com.apple.mobilesafari"
+
+
+def is_extra_icon(item: Any) -> bool:
+    """A second home screen icon of an installed app, not a web app.
+
+    It has the same shape as a Safari web app, ``iconType: app`` with its own UUID
+    ``displayIdentifier``, but carries the app's own bundle id (rejig-app/rejig#6). It
+    is still an item of kind ``webapp``: it is moved and kept the same way.
+    """
+    return is_webapp(item) and item.get("bundleIdentifier") != SAFARI
+
+
 def item_kind(item: Any) -> str:
     """Return ``"folder"``, ``"widget"``, ``"webclip"``, ``"webapp"`` or ``"app"``."""
     if is_folder(item):
@@ -152,6 +165,8 @@ def item_name(item: Any) -> str:
             ident = item_id(item)
         except StateError:
             return "?"
+        if is_extra_icon(item):
+            return f"extra icon of {item['bundleIdentifier']}"
         return f"web app {ident}" if is_webapp(item) else ident
     return repr(item)
 

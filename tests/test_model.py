@@ -5,6 +5,7 @@ import json
 import pytest
 
 import samples
+from ios_homescreen.export import export_layout
 from ios_homescreen.model import describe, to_document
 from ios_homescreen.planner import LayoutError, plan_layout
 from ios_homescreen.state import same_layout
@@ -210,3 +211,37 @@ def test_widget_kinds_are_readable_or_left_out(identifier, app, kind):
     from ios_homescreen.model import widget_kind
 
     assert widget_kind(identifier, app) == kind
+
+
+def test_a_second_icon_of_an_app_is_not_called_a_web_app():
+    # Same shape as a Safari web app, but with the app's own bundle id (rejig-app/rejig#6).
+    photos = "com.apple.mobileslideshow"
+    second = {"displayIdentifier": "F7F9EBCE", "iconLists": [], "iconType": "app"}
+    read = {
+        "state": [
+            [],
+            [
+                {"bundleIdentifier": photos, "displayIdentifier": photos},
+                {**second, "bundleIdentifier": photos},
+                {"displayIdentifier": "9E8D7C6B", "bundleIdentifier": "com.apple.mobilesafari"},
+            ],
+        ],
+        "apps": {
+            photos: {"name": "Photos", "type": "System"},
+            "com.apple.mobilesafari": {"name": "Safari", "type": "System"},
+        },
+    }
+
+    items = describe(read)["pages"][0]["items"]
+    extra, web_app = _find(items, "F7F9EBCE"), _find(items, "9E8D7C6B")
+    text = export_layout(read)
+
+    assert (extra["type"], extra["name"], extra.get("extra_icon")) == (
+        "webapp",
+        "Photos (extra icon)",
+        True,
+    )
+    assert (web_app["name"], web_app.get("extra_icon")) == ("Safari web app", None)
+    assert "# extra icon (Photos)" in text
+    assert "# web app (Safari)" in text
+    assert plan_layout(text, read).payload["iconLists"] == read["state"][1:]

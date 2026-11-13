@@ -90,7 +90,7 @@ export function FolderIcon({ item }) {
 export function Badge({ item }) {
   if (item.offloaded) return html`<span class="badge badge-cloud" title="Offloaded: the app is not on the phone, only its icon">${cloud}</span>`;
   if (item.type === "webclip") return html`<span class="badge" title="Web clip">${globe}</span>`;
-  if (item.type === "webapp") return html`<span class="badge" title="Web app">${globe}</span>`;
+  if (item.type === "webapp" && !item.extra_icon) return html`<span class="badge" title="Web app">${globe}</span>`;
   return null;
 }
 

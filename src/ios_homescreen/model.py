@@ -21,6 +21,7 @@ from .state import (
     cell_count,
     fingerprint,
     folder_pages,
+    is_extra_icon,
     item_id,
     item_kind,
     page_usage,
@@ -136,7 +137,11 @@ def _view(item: Any, apps: Mapping[str, Any], folder_no: list[int]) -> dict[str,
     else:  # webapp
         owner = str(data.get("bundleIdentifier"))
         view["app"] = owner
-        view["name"] = str(name or f"{_app_name(apps, owner)} web app")
+        if is_extra_icon(data):
+            view["extra_icon"] = True
+            view["name"] = str(name or f"{_app_name(apps, owner)} (extra icon)")
+        else:
+            view["name"] = str(name or f"{_app_name(apps, owner)} web app")
     return view
 
 

@@ -16,7 +16,9 @@ you need. Source: <https://github.com/YakupEmreYerli/ios-homescreen>.
    that after you explained what it does.
 3. Never leave web clips (`type = "webclip"`) or Safari web apps (`type = "webapp"`) out of
    the layout, and never leave out a widget unless the person asked to remove it. A write
-   cannot delete web clips or web apps; `check` refuses such a layout.
+   cannot delete web clips or web apps; `check` refuses such a layout. A `webapp` whose
+   comment or name says "extra icon" is a second icon of an installed app, not a web app:
+   do not describe it as a website.
 4. Never write the home screen any other way: no `pymobiledevice3 springboard` commands, no
    `set_icon_state` or `reload_icon_state`, no other tools or scripts, and never a
    list-form layout. SpringBoard then puts every installed app that is not on the list back

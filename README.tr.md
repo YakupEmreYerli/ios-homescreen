@@ -226,6 +226,7 @@ böylece dosya ile telefon yeniden aynı düzeni anlatır.
 | Widget ya da widget yığını | `{ type = "widget", id = "..." }` | Küçük 4 hücre, orta 8, büyük 16. Dock'a ve klasöre konamaz. |
 | Web kısayolu | `{ type = "webclip", id = "..." }` | Ana Ekrana Ekle ile eklenen yer imi. Taşınabilir, kaldırılamaz (aşağıya bakın). |
 | Safari web uygulaması | `{ type = "webapp", id = "..." }` | Ana Ekrana Ekle'de "Web Uygulaması Olarak Aç" seçilerek eklenen site (iOS 26 ve sonrası). Safari'nin paket kimliğini taşır ama kendi kimliği vardır; Safari'den ayrı bir öğedir. Taşınabilir, kaldırılamaz. |
+| Fazladan uygulama simgesi | `{ type = "webapp", id = "..." }` | Yüklü bir uygulamanın ikinci simgesi: uygulamanın paket kimliğini taşır, kendi kimliği vardır. Düzen dosyasında `extra icon` diye geçer. Taşınabilir, kaldırılamaz. |
 
 Planlayıcının uyguladığı kurallar:
 

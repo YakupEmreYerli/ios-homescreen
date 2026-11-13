@@ -219,6 +219,7 @@ file and the phone are in step again.
 | Widget or widget stack | `{ type = "widget", id = "..." }` | Small 4 cells, medium 8, large 16. Not allowed in the dock or in folders. |
 | Web clip | `{ type = "webclip", id = "..." }` | A bookmark added with Add to Home Screen. Can be moved, not removed (see below). |
 | Safari web app | `{ type = "webapp", id = "..." }` | A site added with Add to Home Screen and "Open as Web App" (iOS 26 and later). It has Safari's bundle id and its own id; it is a separate item from Safari. Can be moved, not removed. |
+| Extra app icon | `{ type = "webapp", id = "..." }` | A second icon of an installed app: the app's bundle id with its own id. The layout file marks it `extra icon`. Can be moved, not removed. |
 
 Rules the planner enforces:
 

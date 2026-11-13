@@ -13,6 +13,7 @@ from .state import (
     StateError,
     cell_count,
     folder_pages,
+    is_extra_icon,
     item_id,
     item_kind,
     page_usage,
@@ -88,7 +89,7 @@ def _entry(item: Any, names: _Names) -> tuple[str, str]:
         return f'{{ type = "widget", id = {_quote(ident)} }}', _widget_comment(item, names)
     if kind == "webapp":
         owner = names.of_bundle(str(item.get("bundleIdentifier")))
-        label = f"web app ({owner})"
+        label = f"{'extra icon' if is_extra_icon(item) else 'web app'} ({owner})"
         if item.get("displayName"):
             label += f": {item['displayName']}"
         return f'{{ type = "webapp", id = {_quote(ident)} }}', label
