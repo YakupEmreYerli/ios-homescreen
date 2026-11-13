@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2 — 2026-11-13
+
+- A correct write is no longer rolled back when iOS moves a widget within its page to keep a nearly full page packed ([rejig-app/rejig#3](https://github.com/rejig-app/rejig/issues/3)), or puts a web clip that no read had shown into a slot the write freed ([rejig-app/rejig#7](https://github.com/rejig-app/rejig/issues/7)). Either case is reported as a warning; any other difference still rolls back.
+- A second home screen icon of an installed app is called an extra icon, not a web app ([rejig-app/rejig#6](https://github.com/rejig-app/rejig/issues/6)).
+- The Apply dialog, the README and the agent guide say that a write makes hidden pages visible again: the iPhone reads the same whether a page is hidden or not ([rejig-app/rejig#5](https://github.com/rejig-app/rejig/issues/5)).
+
 ## 0.1.1 — 2026-11-13
 
 - Offloaded apps that live only in the App Library stay there after a write. Installation Proxy lists them only when asked for placeholders, so a write left them out of its ignored list and SpringBoard put them back on a page. An offloaded app moved to the home screen is now written in SpringBoard's own form. Found by [Rejig](https://github.com/rejig-app/rejig).
