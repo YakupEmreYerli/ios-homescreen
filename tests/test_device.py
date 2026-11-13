@@ -307,7 +307,10 @@ def test_the_model_is_the_name_the_connection_reported():
     [
         ("iPhone15,4", "iPhone 15"),
         ("iPhone18,4", "iPhone Air"),
+        ("iPhone18,5", "iPhone 17e"),
+        ("iPhone19,2", "iPhone 18 Pro"),
         ("iPhone19,4", "iPhone Duo"),
+        ("iPhone19,7", "iPhone 18 Pro Max"),
         ("iPhone99,1", "iPhone99,1"),
     ],
 )
