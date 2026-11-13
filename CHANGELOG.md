@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3 — 2026-11-13
+
+- A layout with more than 15 pages is refused before anything is written: an iPhone keeps 15 pages and drops the rest, so such a write always rolled back. The editor's Add page stops at 15 too.
+- Astronomy's watch proxy and Continuity are treated as hidden system services. They are not tagged hidden, but SpringBoard shows no icon for them, so placing them made a write roll back. They no longer show in the App Library list and cannot be placed.
+- Both found by a contributor to [Rejig](https://github.com/rejig-app/rejig) on iOS 27.2 ([rejig-app/rejig#2](https://github.com/rejig-app/rejig/pull/2)).
+
 ## 0.1.2 — 2026-11-13
 
 - A correct write is no longer rolled back when iOS moves a widget within its page to keep a nearly full page packed ([rejig-app/rejig#3](https://github.com/rejig-app/rejig/issues/3)), or puts a web clip that no read had shown into a slot the write freed ([rejig-app/rejig#7](https://github.com/rejig-app/rejig/issues/7)). Either case is reported as a warning; any other difference still rolls back.

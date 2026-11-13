@@ -1,3 +1,3 @@
 """Read, plan and safely rewrite an iPhone home screen layout."""
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
