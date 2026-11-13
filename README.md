@@ -423,6 +423,9 @@ app icons as PNG bytes.
 - Writing a layout can put widgets where you chose what they show, such as a stack's selected
   widget, back to their default choice: SpringBoard drops that choice on a write (seen on
   iOS 27). The check after writing ignores it for that reason.
+- Empty spaces left between icons are not kept. SpringBoard sends each page as a list
+  without cell positions, so a write can close gaps on any page, including pages you did not
+  change (seen on iOS 26).
 - Wi-Fi needs iOS 17 or later.
 - The browser editor shows the phone's wallpaper only when SpringBoard sends it. On iOS 27
   over Wi-Fi the phone closes that request (seen on iOS 27.0.1), so the editor uses a plain

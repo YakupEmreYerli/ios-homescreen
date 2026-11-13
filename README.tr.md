@@ -430,6 +430,9 @@ yeniden düzene çevirir; `plan.change_list` değişiklikleri veri olarak tutar.
 - Düzen yazınca, ne göstereceğini sizin seçtiğiniz widget'lar (örneğin bir yığında seçili
   widget) varsayılan seçime dönebilir: SpringBoard yazma sırasında bu seçimi bırakıyor (iOS 27'de
   görüldü). Yazmadan sonraki denetim de bu yüzden bu seçime bakmaz.
+- Simgeler arasında bıraktığınız boşluklar korunmaz. SpringBoard her sayfayı hücre konumu
+  olmadan sıralı bir liste olarak gönderiyor; bu yüzden bir yazma, değiştirmediğiniz sayfalar
+  dahil her sayfadaki boşlukları kapatabilir (iOS 26'da görüldü).
 - Wi-Fi için iOS 17 ya da sonrası gerekir.
 - Tarayıcı düzenleyicisi telefonun duvar kâğıdını yalnız SpringBoard gönderirse gösterir.
   iOS 27'de Wi-Fi üzerinden telefon bu isteği kapatıyor (iOS 27.0.1'de görüldü); düzenleyici
