@@ -23,7 +23,7 @@ function libraryApps(state) {
 
 function LibraryRow({ app }) {
   const icon = useRef(null);
-  const item = { type: "app", id: app.id, name: app.name, cells: 1, offloaded: false };
+  const item = { type: "app", id: app.id, name: app.name, cells: 1, offloaded: Boolean(app.offloaded) };
   const page = getState().page + 1;
   return html`<li
     class="lib-row"

@@ -101,7 +101,7 @@ def app_places(read: Mapping[str, Any]) -> list[dict[str, Any]]:
                 "name": str(meta.get("name", ident)),
                 "id": ident,
                 "type": app_type(meta) or "",
-                "offloaded": False,
+                "offloaded": bool(meta.get("offloaded")),
                 "where": {"section": "library"},
             },
         )

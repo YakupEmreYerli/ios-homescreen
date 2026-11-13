@@ -218,6 +218,7 @@ def test_installed_apps_keep_user_and_system_only_and_flag_hidden_services():
             "ApplicationType": "System",
             "SBAppTags": ["arkit"],
         },
+        "o": {"CFBundleDisplayName": "Offloaded", "ApplicationType": "User", "IsDemotedApp": True},
     }
     installer = FakeInstaller(apps)
     device = Device(FakeLockdown(), installer_factory=lambda _: installer)
@@ -228,9 +229,12 @@ def test_installed_apps_keep_user_and_system_only_and_flag_hidden_services():
         "n": {"name": "n", "type": "User"},
         "com.apple.AirDropUI": {"name": "AirDropUI", "type": "System", "hidden": True},
         "com.apple.measure": {"name": "Measure", "type": "System"},
+        "o": {"name": "Offloaded", "type": "User", "offloaded": True},
     }
     assert installer.options["ApplicationType"] == "Any"
-    assert "SBAppTags" in installer.options["ReturnAttributes"]
+    # Without it Installation Proxy leaves offloaded apps out.
+    assert installer.options["ShowPlaceholders"] is True
+    assert {"SBAppTags", "IsDemotedApp"} <= set(installer.options["ReturnAttributes"])
 
 
 def test_a_missing_app_list_is_an_error():

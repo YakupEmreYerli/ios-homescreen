@@ -592,6 +592,7 @@ class Session:
                             "id": ident,
                             "name": str(meta.get("name", ident)),
                             "type": str(meta.get("type", "")),
+                            "offloaded": bool(meta.get("offloaded")),
                         }
                         for ident, meta in apps.items()
                         if isinstance(meta, Mapping) and not is_hidden_app(meta)

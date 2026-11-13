@@ -239,7 +239,7 @@ def installed_apps() -> dict[str, dict[str, str]]:
         bundle: {"name": name, "type": "System" if bundle.startswith("com.apple.") else "User"}
         for bundle, name in ON_SCREEN_APPS.items()
     }
-    apps[OFFLOADED] = {"name": "Journal", "type": "User"}
+    apps[OFFLOADED] = {"name": "Journal", "type": "User", "offloaded": True}
     apps.update({b: {"name": b.rsplit(".", 1)[-1], "type": "System"} for b in LIBRARY_SYSTEM_APPS})
     apps.update({b: {"name": f"App {b[-2:]}", "type": "User"} for b in LIBRARY_USER_APPS})
     return apps

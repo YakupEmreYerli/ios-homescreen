@@ -183,6 +183,23 @@ items = [{ type = "webclip", id = "web-1" }]
     assert plan.to_home_screen == ("com.c",)
 
 
+def test_an_offloaded_app_moved_home_gets_springboards_form():
+    read = _read()
+    read["apps"]["com.c"]["offloaded"] = True
+    layout = """
+[dock]
+items = ["com.a", "com.c"]
+
+[[pages]]
+items = ["com.b", { type = "widget", id = "widget-1" }, { type = "webclip", id = "web-1" }]
+"""
+
+    plan = plan_layout(layout, read)
+
+    assert plan.payload["buttonBar"][1] == {"displayIdentifier": "com.c"}
+    assert plan.to_home_screen == ("com.c",)
+
+
 def test_explicit_app_table_takes_ids_only():
     plan = plan_layout(
         '[dock]\nitems = [{ type = "app", id = "com.a" }]\n'

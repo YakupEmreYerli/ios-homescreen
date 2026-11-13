@@ -454,7 +454,7 @@ export function addFromLibrary(app) {
   const state = getState();
   if (!state.draft) return;
   const page = state.draft.pages[state.page] || [];
-  const item = { type: "app", id: app.id, name: app.name, cells: 1, offloaded: false };
+  const item = { type: "app", id: app.id, name: app.name, cells: 1, offloaded: Boolean(app.offloaded) };
   if (pageCells(page) + 1 > PAGE_CELLS) {
     return showProblem({ code: "page_full", refused: true, location: { page: state.page + 1 }, details: { cells: PAGE_CELLS + 1, capacity: PAGE_CELLS } });
   }

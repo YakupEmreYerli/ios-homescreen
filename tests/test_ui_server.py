@@ -237,7 +237,8 @@ def test_read_gives_the_view_the_apps_and_saves_the_read(make_api, tmp_path):
     view = state["read"]["view"]
     assert view["dock"][0]["id"] == "com.apple.mobilephone"
     assert len(view["pages"]) == 2
-    assert {"id": "com.apple.tips", "name": "tips", "type": "System"} in state["read"]["apps"]
+    tips = {"id": "com.apple.tips", "name": "tips", "type": "System", "offloaded": False}
+    assert tips in state["read"]["apps"]
     assert state["device"]["name"] == "Test iPhone"
     assert state["connection"]["kind"] == "demo" or state["connection"]["label"]
     assert state["error"] is None

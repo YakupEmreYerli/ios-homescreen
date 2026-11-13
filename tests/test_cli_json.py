@@ -13,6 +13,7 @@ import samples
 from fakes import FakeSpringBoard, FakeWifiBackend, must_not_connect, opener_for
 from ios_homescreen.cli import main
 from ios_homescreen.export import export_layout
+from ios_homescreen.report import app_places
 from ios_homescreen.snapshots import make_backup
 from ios_homescreen.state import save_plist
 
@@ -370,3 +371,18 @@ def test_apps_needs_a_pull(home, capsys):
     code, result = run_json(capsys, "apps")
 
     assert (code, result["error"]["code"]) == (1, "no_pull")
+
+
+def test_an_offloaded_app_in_the_app_library_is_listed_as_offloaded():
+    read = {
+        "state": [[{"bundleIdentifier": "com.a", "displayIdentifier": "com.a"}]],
+        "apps": {
+            "com.a": {"name": "A", "type": "User"},
+            "com.o": {"name": "O", "type": "User", "offloaded": True},
+        },
+    }
+
+    found = {app["id"]: app for app in app_places(read)}
+
+    assert found["com.o"]["offloaded"] is True
+    assert found["com.o"]["where"] == {"section": "library"}

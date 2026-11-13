@@ -17,13 +17,15 @@ from .transport import CLOSE_TIMEOUT, Backend, Transport, close_quietly, connect
 READ_TIMEOUT = 30.0
 
 # What Installation Proxy is asked for. SBAppTags marks system services that never show
-# on the home screen or in the App Library ("hidden"), such as AirDropUI.
+# on the home screen or in the App Library ("hidden"), such as AirDropUI. IsDemotedApp
+# marks offloaded apps (only the icon is left on the phone).
 APP_ATTRIBUTES = [
     "CFBundleIdentifier",
     "CFBundleDisplayName",
     "CFBundleName",
     "ApplicationType",
     "SBAppTags",
+    "IsDemotedApp",
 ]
 SEND_TIMEOUT = 10.0
 REPLY_TIMEOUT = 3.0
@@ -177,6 +179,10 @@ class Device:
         Each is ``{"name", "type"}``, plus ``"hidden": True`` for system services that
         iOS never shows (``SBAppTags`` contains ``hidden``). Hidden apps still have to be
         listed in a write's ``ignored`` list, but they are not App Library apps.
+
+        Installation Proxy lists offloaded apps only with ``ShowPlaceholders``; a write
+        that leaves one out of ``ignored`` puts it back on a page. They get
+        ``"offloaded": True``.
         """
         service = self._installer_factory(self.lockdown)
 
@@ -184,7 +190,11 @@ class Device:
             await service.connect()
             try:
                 return await service.lookup(
-                    {"ApplicationType": "Any", "ReturnAttributes": APP_ATTRIBUTES}
+                    {
+                        "ApplicationType": "Any",
+                        "ShowPlaceholders": True,
+                        "ReturnAttributes": APP_ATTRIBUTES,
+                    }
                 )
             finally:
                 await service.close()
@@ -199,6 +209,8 @@ class Device:
                 continue
             name = meta.get("CFBundleDisplayName") or meta.get("CFBundleName") or ident
             apps[ident] = {"name": str(name), "type": str(kind)}
+            if meta.get("IsDemotedApp"):
+                apps[ident]["offloaded"] = True
             tags = meta.get("SBAppTags")
             if isinstance(tags, list | tuple) and "hidden" in tags:
                 apps[ident]["hidden"] = True

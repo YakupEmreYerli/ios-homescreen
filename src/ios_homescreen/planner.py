@@ -223,6 +223,9 @@ class _Resolver:
         raw = self.raw.get(ident)
         if raw is not None and item_kind(raw) == "app":
             return deepcopy(raw)
+        if self.installed.get(ident, {}).get("offloaded"):
+            # SpringBoard's own form for an offloaded app: no bundleIdentifier.
+            return {"displayIdentifier": ident}
         return {"bundleIdentifier": ident, "displayIdentifier": ident}
 
     def app_by_id(self, ident: Any, where: Location) -> Any:
