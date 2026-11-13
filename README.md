@@ -433,7 +433,8 @@ app icons as PNG bytes.
   over Wi-Fi the phone closes that request (seen on iOS 27.0.1), so the editor uses a plain
   background there. The only other way to get an image is a screenshot of the home screen
   with its icons, which cannot serve as a background.
-- Empty pages are not written; SpringBoard does not keep them.
+- Empty pages are not written; SpringBoard does not keep them. An iPhone keeps at most 15
+  pages, so a layout with more is refused before anything is written.
 - Page capacity uses the iPhone grid (6 by 4). iPads have not been tested.
 - The layout format is Apple's and undocumented, and an iOS update can change it. Pull again
   after an update; the backup and rollback are there for the case where it changes.

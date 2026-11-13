@@ -406,3 +406,13 @@ def test_a_web_clip_the_layout_left_out_is_not_excused():
 
 def test_an_unknown_web_clip_does_not_hide_another_difference():
     assert match_readback([[], [B, A, CLIP]], [[], [A, B]], before=[[], [A, B]]) is None
+
+
+def test_a_payload_past_15_pages_never_reaches_the_phone():
+    pages = [[{"bundleIdentifier": f"app{n}"}] for n in range(16)]
+
+    with pytest.raises(StateError, match="at most 15") as error:
+        validate_write_payload({"buttonBar": [], "iconLists": pages, "ignored": []})
+
+    assert error.value.code == "too_many_pages"
+    validate_write_payload({"buttonBar": [], "iconLists": pages[:15], "ignored": []})

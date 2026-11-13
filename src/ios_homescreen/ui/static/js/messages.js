@@ -10,6 +10,7 @@ export function refusalShort(problem) {
     {
       dock_full: "The dock is full",
       page_full: "This page is full",
+      too_many_pages: "No room for another page",
       widget_in_dock: "Widgets can't go in the dock",
       widget_in_folder: "Widgets can't go in folders",
       nested_folder: "Folders can't go in folders",
@@ -40,6 +41,10 @@ export function issueText(issue, nameOf = (id) => id) {
   const where = issue.location || {};
   const name = d.id ? quote(nameOf(d.id)) : "An item";
   switch (issue.code) {
+    case "too_many_pages":
+      return `The iPhone holds at most ${d.capacity ?? 15} home screen pages. Make room on the other pages, use folders, or keep some apps in the App Library.`;
+    case "hidden_app":
+      return `${name} is a hidden system service: the iPhone shows no icon for it.`;
     case "dock_full":
       return `The dock holds ${d.capacity ?? 4} items. Take ${(d.count ?? 5) - (d.capacity ?? 4)} out of it.`;
     case "page_full":

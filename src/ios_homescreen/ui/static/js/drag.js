@@ -223,7 +223,7 @@ function pageCount(state) {
   const pages = state.draft.pages;
   const last = pages[pages.length - 1];
   // One extra page past the end while dragging, like SpringBoard.
-  return last && last.length ? pages.length + 1 : pages.length;
+  return last && last.length && pages.length < L.MAX_PAGES ? pages.length + 1 : pages.length;
 }
 
 function flipTo(page) {

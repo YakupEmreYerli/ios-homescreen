@@ -15,6 +15,7 @@ export const DOCK_HEIGHT = 94;
 export const DOCK_ICON_TOP = DOCK_TOP + (DOCK_HEIGHT - ICON) / 2;
 export const DOCK_SLOTS = 4;
 export const PAGE_CELLS = 24;
+export const MAX_PAGES = 15;
 
 export const FOLDER_COLS = 3;
 export const FOLDER_ROWS = 3;

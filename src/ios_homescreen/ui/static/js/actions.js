@@ -2,7 +2,7 @@
 
 import { ApiError, followJob, get, post } from "./api.js";
 import { configureDrag } from "./drag.js";
-import { PAGE_CELLS, pageCells } from "./layout.js";
+import { MAX_PAGES, PAGE_CELLS, pageCells } from "./layout.js";
 import { refusalText } from "./messages.js";
 import * as ops from "./ops.js";
 import { getState, initState, setState } from "./store.js";
@@ -516,6 +516,9 @@ export function ungroupFolder(item) {
 
 export function addPage() {
   const state = getState();
+  if (state.draft.pages.length >= MAX_PAGES) {
+    return showProblem({ code: "too_many_pages", refused: true, details: { capacity: MAX_PAGES } });
+  }
   const at = state.page + 1;
   commit(ops.addPage(state.draft, at));
   setState({ page: at });

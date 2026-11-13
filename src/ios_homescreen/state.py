@@ -20,6 +20,9 @@ from typing import Any
 PAGE_CELLS = 24
 """An iPhone home screen page is a 6x4 grid."""
 
+MAX_PAGES = 15
+"""An iPhone keeps at most 15 home screen pages; it drops the rest of a write (iOS 27.2)."""
+
 DOCK_SLOTS = 4
 
 WIDGET_CELLS = {"small": 4, "medium": 8, "large": 16, "extraLarge": 16}
@@ -469,6 +472,11 @@ def _check_item(item: Any, where: str, *, in_folder: bool = False, for_write: bo
 def _check_sections(dock: Any, pages: Any, ignored: Any = None, *, for_write: bool = False) -> None:
     if not isinstance(dock, list) or not isinstance(pages, list):
         raise StateError("buttonBar and iconLists must be lists")
+    if len(pages) > MAX_PAGES:
+        raise StateError(
+            f"the iPhone holds at most {MAX_PAGES} home screen pages, got {len(pages)}",
+            code="too_many_pages",
+        )
     if len(dock) > DOCK_SLOTS:
         raise StateError(f"the dock holds at most {DOCK_SLOTS} items, got {len(dock)}")
     for pos, item in enumerate(dock, 1):

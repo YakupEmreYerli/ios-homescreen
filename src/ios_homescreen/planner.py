@@ -25,6 +25,7 @@ from .report import change_lines, change_summary
 from .snapshots import utc_now
 from .state import (
     DOCK_SLOTS,
+    MAX_PAGES,
     PAGE_CELLS,
     PLAN_FORMAT_VERSION,
     PLAN_META_KEY,
@@ -233,6 +234,11 @@ class _Resolver:
             raise _fail("missing_id", "an app needs a non-empty id", where)
         if not self._is_app_id(ident):
             raise _fail("unknown_app", f"unknown app id {ident!r}", where, id=ident)
+        if is_hidden_app(self.installed.get(ident)):
+            # iOS shows no icon for it and drops it from a write, which then rolls back.
+            raise _fail(
+                "hidden_app", f"{ident} is a hidden system service with no icon", where, id=ident
+            )
         return self._app_item(ident)
 
     def app_by_ref(self, ref: str, where: Location) -> Any:
@@ -240,7 +246,7 @@ class _Resolver:
         if not ref:
             raise _fail("missing_id", "empty app reference", where)
         if self._is_app_id(ref):
-            return self._app_item(ref)
+            return self.app_by_id(ref, where)
         matches = {i for i in self.names.get(ref, set()) if self._is_app_id(i)}
         if not matches and ref in self.raw:
             kind = item_kind(self.raw[ref])
@@ -531,6 +537,15 @@ def plan_layout(
     page_tables = document.get("pages", [])
     if not isinstance(page_tables, list):
         raise _fail("bad_structure", "pages must be an array of tables ([[pages]])")
+    if len(page_tables) > MAX_PAGES:
+        planner.collect(
+            _fail(
+                "too_many_pages",
+                f"the iPhone holds at most {MAX_PAGES} home screen pages, got {len(page_tables)}",
+                count=len(page_tables),
+                capacity=MAX_PAGES,
+            )
+        )
     pages: list[list[Any]] = []
     for page_no, table in enumerate(page_tables, 1):
         where = Location("page", page_no)

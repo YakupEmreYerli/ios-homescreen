@@ -28,6 +28,9 @@ APP_ATTRIBUTES = [
     "SBAppTags",
     "IsDemotedApp",
 ]
+# System helpers that SBAppTags does not mark hidden, yet SpringBoard drops them from a
+# write instead of showing an icon (iOS 27.2): Astronomy's watch proxy and Continuity.
+HIDDEN_HELPERS = frozenset({"com.apple.NanoUniverse.AegirProxyApp", "com.apple.sidecar"})
 SEND_TIMEOUT = 10.0
 REPLY_TIMEOUT = 3.0
 ICON_TIMEOUT = 10.0
@@ -233,7 +236,7 @@ class Device:
             if meta.get("IsDemotedApp"):
                 apps[ident]["offloaded"] = True
             tags = meta.get("SBAppTags")
-            if isinstance(tags, list | tuple) and "hidden" in tags:
+            if (isinstance(tags, list | tuple) and "hidden" in tags) or ident in HIDDEN_HELPERS:
                 apps[ident]["hidden"] = True
         return apps
 

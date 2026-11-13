@@ -440,7 +440,8 @@ yeniden düzene çevirir; `plan.change_list` değişiklikleri veri olarak tutar.
   iOS 27'de Wi-Fi üzerinden telefon bu isteği kapatıyor (iOS 27.0.1'de görüldü); düzenleyici
   o zaman düz bir arka plan kullanır. Görüntü almanın tek başka yolu, simgeleriyle birlikte
   ana ekranın ekran görüntüsü; o da arka plan olarak kullanılamaz.
-- Boş sayfalar yazılmaz; SpringBoard onları tutmuyor.
+- Boş sayfalar yazılmaz; SpringBoard onları tutmuyor. iPhone en fazla 15 sayfa tutar; daha
+  fazla sayfalı bir düzen telefona dokunmadan reddedilir.
 - Sayfa kapasitesi iPhone ızgarasına (6'ya 4) göre hesaplanır. iPad'de denenmedi.
 - Düzen biçimi Apple'ın ve belgelenmemiş; bir iOS güncellemesi onu değiştirebilir.
   Güncellemeden sonra yeniden `pull` çalıştırın; biçim değişirse yedek ve geri dönüş bunun için var.

@@ -219,6 +219,8 @@ def test_installed_apps_keep_user_and_system_only_and_flag_hidden_services():
             "SBAppTags": ["arkit"],
         },
         "o": {"CFBundleDisplayName": "Offloaded", "ApplicationType": "User", "IsDemotedApp": True},
+        # Not tagged hidden, but SpringBoard drops it from a write.
+        "com.apple.sidecar": {"CFBundleName": "Continuity", "ApplicationType": "System"},
     }
     installer = FakeInstaller(apps)
     device = Device(FakeLockdown(), installer_factory=lambda _: installer)
@@ -230,6 +232,7 @@ def test_installed_apps_keep_user_and_system_only_and_flag_hidden_services():
         "com.apple.AirDropUI": {"name": "AirDropUI", "type": "System", "hidden": True},
         "com.apple.measure": {"name": "Measure", "type": "System"},
         "o": {"name": "Offloaded", "type": "User", "offloaded": True},
+        "com.apple.sidecar": {"name": "Continuity", "type": "System", "hidden": True},
     }
     assert installer.options["ApplicationType"] == "Any"
     # Without it Installation Proxy leaves offloaded apps out.

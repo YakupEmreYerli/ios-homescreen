@@ -265,6 +265,32 @@ def test_invalid_layouts_are_rejected_with_a_clear_error(layout, message):
         plan_layout(layout, _read(), allow_removal=True)
 
 
+def test_a_layout_past_15_pages_is_refused_before_anything_is_written():
+    # The iPhone keeps 15 pages and drops the rest of a write, which then rolls back.
+    read = _read()
+    read["apps"].update({f"com.n{n}": {"name": f"N{n}", "type": "User"} for n in range(15)})
+    fifteen = "".join(f'[[pages]]\nitems = ["com.n{n}"]\n' for n in range(14)) + KEEP_SPECIALS
+
+    assert len(plan_layout(fifteen, read, allow_removal=True).payload["iconLists"]) == 15
+    with pytest.raises(LayoutError, match="at most 15 home screen pages, got 16") as error:
+        plan_layout(fifteen + '[[pages]]\nitems = ["com.n14"]\n', read, allow_removal=True)
+
+    assert error.value.issues[0].code == "too_many_pages"
+
+
+def test_a_hidden_system_service_cannot_be_placed():
+    # Astronomy's watch proxy and Continuity: iOS drops them from a write.
+    read = _read()
+    read["apps"]["com.apple.sidecar"] = {"name": "Continuity", "type": "System", "hidden": True}
+
+    with pytest.raises(LayoutError, match="hidden system service") as error:
+        plan_layout('[[pages]]\nitems = ["com.apple.sidecar"]\n' + KEEP_SPECIALS, read)
+
+    assert error.value.issues[0].code == "hidden_app"
+    plan = plan_layout(KEEP_SPECIALS, read, allow_removal=True)
+    assert "com.apple.sidecar" in plan.payload["ignored"]
+
+
 def test_ambiguous_app_name_asks_for_the_bundle_id():
     read = _read()
     read["apps"]["com.other"] = {"name": "A", "type": "User"}
