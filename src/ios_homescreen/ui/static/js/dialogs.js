@@ -74,7 +74,7 @@ function ApplyDialog() {
         </div>`
       : null}
     <div class="callout">
-      Empty spaces between icons are not kept: a write can close them on any page, including pages you did not change.
+      Empty spaces between icons are not kept, and hidden pages become visible again: the iPhone reports neither, so a write cannot keep them.
     </div>
     <ol class="safety">
       <li><span>1</span>Backup</li>
@@ -179,7 +179,7 @@ function BackupsDialog() {
   const showcase = Boolean(state.server?.showcase);
   return html`<${Modal} title="Backups" wide>
     <h3 class="modal-title">Backups</h3>
-    <p class="modal-text">A backup is saved before every write. Restoring one writes it to the phone with the same checks as Apply (and backs up the current layout first). Empty spaces between icons are not kept.</p>
+    <p class="modal-text">A backup is saved before every write. Restoring one writes it to the phone with the same checks as Apply (and backs up the current layout first). Empty spaces between icons and hidden pages are not kept.</p>
     ${backups === null ? html`<div class="empty"><span class="spinner small"></span> Loading...</div>` : null}
     ${showcase ? html`<div class="empty">Showcase mode does not list backups and cannot restore them.</div>` : null}
     ${backups && !backups.length && !showcase ? html`<div class="empty">No backups yet. One is made before every Apply.</div>` : null}

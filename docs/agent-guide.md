@@ -117,6 +117,9 @@ items = ["Health", "Wallet"]
 - Widgets cannot go in the dock or in folders. Widgets, web clips and web apps are referred
   to by their `id` from the pull and cannot be created.
 - Empty pages are dropped. Unknown keys are errors.
+- Hidden pages are pulled as normal pages, and any push makes them visible again; the phone
+  does not say which pages are hidden. Page numbers count hidden pages too. If the person
+  hides pages, tell them before the first push.
 
 ## Turning a request into edits
 

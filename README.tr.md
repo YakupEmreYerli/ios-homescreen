@@ -423,8 +423,9 @@ yeniden düzene çevirir; `plan.change_list` değişiklikleri veri olarak tutar.
 
 ## Sınırlar
 
-- Protokolde gizli ana ekran sayfaları için bir ayar yok; ios-homescreen sayfa gizleyemez ya da
-  gösteremez.
+- Gizli ana ekran sayfaları normal sayfa gibi okunur ve bir yazma onları yeniden görünür yapar:
+  SpringBoard'un okuması sayfa gizli de olsa aynı geliyor (iOS 27.2'de denendi); bu yüzden
+  ios-homescreen gizli sayfayı ayırt edemez, gizli tutamaz ve sayfa gizleyemez.
 - Bugün görünümü ve Kilitli Ekran widget'ları ana ekran düzeninin parçası değil, kapsam dışında.
 - Widget taşınabilir ya da kaldırılabilir ama oluşturulamaz. Web kısayolu ve Safari web
   uygulaması yalnız taşınabilir; onları telefonda silin.

@@ -415,8 +415,9 @@ app icons as PNG bytes.
 
 ## Limitations
 
-- The protocol has no setting for hidden home screen pages, so ios-homescreen cannot hide or
-  show pages.
+- Hidden home screen pages are read as normal pages, and a write makes them visible again:
+  SpringBoard's read is the same whether a page is hidden or not (checked on iOS 27.2), so
+  ios-homescreen cannot tell them apart, keep them hidden, or hide a page.
 - The Today view and Lock Screen widgets are not part of the home screen layout and are out
   of scope.
 - Widgets can be moved or removed but not created. Web clips and Safari web apps can only be
