@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 — 2026-11-13
 
 - Offloaded apps that live only in the App Library stay there after a write. Installation Proxy lists them only when asked for placeholders, so a write left them out of its ignored list and SpringBoard put them back on a page. An offloaded app moved to the home screen is now written in SpringBoard's own form. Found by [Rejig](https://github.com/rejig-app/rejig).
 - Over Wi-Fi, a read that fails after a write opens a new tunnel to the same iPhone and tries once more: a home screen write can drop the whole tunnel. Found by Rejig.
