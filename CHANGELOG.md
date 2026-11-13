@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Desktop app: `ios-homescreen-app` opens the editor in its own window, with no terminal or browser. It connects over USB when a cable is in and looks on the network otherwise. Downloadable builds for macOS (.dmg), Windows (installer .exe) and Linux (AppImage) are made by the Desktop apps workflow.
+- macOS and Windows: data and cache go to the system's own folders, and the connection help names the service each system uses.
+
 ## 0.1.3 — 2026-11-13
 
 - A layout with more than 15 pages is refused before anything is written: an iPhone keeps 15 pages and drops the rest, so such a write always rolled back. The editor's Add page stops at 15 too.
