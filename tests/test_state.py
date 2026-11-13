@@ -7,12 +7,14 @@ import pytest
 
 import samples
 from ios_homescreen.state import (
+    ReadBack,
     StateError,
     cell_count,
     fingerprint,
     item_id,
     item_kind,
     load_plist,
+    match_readback,
     safe_payload,
     same_layout,
     save_plist,
@@ -353,3 +355,54 @@ def test_write_payload_must_be_the_exact_dictionary():
         validate_write_payload([[], []])
     with pytest.raises(StateError, match="exactly"):
         validate_write_payload({"buttonBar": [], "iconLists": [], "ignored": [], "extra": 1})
+
+
+# ------------------------------------------------------------------ read-back after a write
+
+A = {"bundleIdentifier": "a", "displayIdentifier": "a"}
+B = {"bundleIdentifier": "b", "displayIdentifier": "b"}
+C = {"bundleIdentifier": "c", "displayIdentifier": "c"}
+W = {"elementType": "widget", "displayIdentifier": "w", "gridSize": "small"}
+CLIP = {"displayIdentifier": "clip", "webClipURL": "/home"}
+
+
+def test_an_exact_read_back_matches_with_nothing_to_explain():
+    assert match_readback([[A], [B, W, C]], [[A], [B, W, C]]) == ReadBack()
+
+
+def test_a_widget_moved_on_its_own_page_is_accepted_and_named():
+    # SpringBoard packs a 2x2 widget on a nearly full page (rejig-app/rejig#3).
+    matched = match_readback([[], [A, B, C, W]], [[], [A, W, B, C]])
+
+    assert matched == ReadBack(reflowed_widgets=("w",))
+
+
+@pytest.mark.parametrize(
+    "read",
+    [
+        [[], [A, B, C], [W]],  # the widget on another page
+        [[], [B, W, A, C]],  # apps in another order
+        [[], [A, {**W, "gridSize": "medium"}, B, C]],  # another size
+        [[], [A, B, C]],  # the widget is gone
+    ],
+)
+def test_other_differences_still_fail(read):
+    assert match_readback(read, [[], [A, W, B, C]]) is None
+
+
+def test_a_web_clip_that_no_read_showed_is_accepted_and_named():
+    # iOS can hold a web clip that getIconState leaves out and put it in a slot a write
+    # freed (rejig-app/rejig#7).
+    matched = match_readback([[], [A, B, CLIP]], [[], [A, B]], before=[[], [A, B, C]])
+
+    assert matched == ReadBack(added_webclips=("clip",))
+
+
+def test_a_web_clip_the_layout_left_out_is_not_excused():
+    # It was on the phone before the write, so the write really left it out.
+    assert match_readback([[], [A, B], [CLIP]], [[], [A, B]], before=[[], [A, B, CLIP]]) is None
+    assert match_readback([[], [A, B, CLIP]], [[], [A, B]], before=[[], [A, CLIP, B]]) is None
+
+
+def test_an_unknown_web_clip_does_not_hide_another_difference():
+    assert match_readback([[], [B, A, CLIP]], [[], [A, B]], before=[[], [A, B]]) is None

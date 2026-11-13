@@ -318,3 +318,60 @@ def test_a_write_that_leaves_out_a_web_clip_is_rolled_back(tmp_path):
     after_first_write = device.writes[0]
     assert samples.STATUS_CLIP not in json.dumps(after_first_write, default=str)
     assert same_layout(run(device.read_state()), start)
+
+
+# ------------------------------------------------------------------ what iOS does on its own
+
+
+class PackingSpringBoard(FakeSpringBoard):
+    """After a write, SpringBoard moves the widget to the end of its page."""
+
+    async def write_state(self, payload):
+        await super().write_state(payload)
+        for page in self._state[1:]:
+            widgets = [x for x in page if isinstance(x, dict) and x.get("elementType")]
+            page[:] = [x for x in page if x not in widgets] + widgets
+
+
+class HiddenClipSpringBoard(FakeSpringBoard):
+    """Holds a web clip that reads leave out until a write frees a slot for it."""
+
+    async def write_state(self, payload):
+        await super().write_state(payload)
+        if not any(x == HIDDEN_CLIP for page in self._state[1:] for x in page):
+            self._state[1].append(deepcopy(HIDDEN_CLIP))
+
+
+HIDDEN_CLIP = {"displayIdentifier": "hidden-clip", "displayName": "Home", "webClipURL": "/home"}
+WIDGET = {
+    "elementType": "widget",
+    "displayIdentifier": "w",
+    "displayName": "W",
+    "gridSize": "small",
+}
+
+
+def test_a_widget_ios_packs_on_its_page_does_not_roll_back(tmp_path):
+    start = [[], [{"bundleIdentifier": "a"}, WIDGET, {"bundleIdentifier": "b"}]]
+    device = PackingSpringBoard(start, _installed("a", "b"))
+    plan = _plan_from(start, [[{"bundleIdentifier": "b"}, WIDGET, {"bundleIdentifier": "a"}]])
+
+    result = run(apply_state(device, plan, backup_dir=tmp_path, timing=FAST))
+
+    assert result.status == APPLIED
+    warning = next(e for e in result.events if e.code == "widgets_reflowed")
+    assert warning.data["ids"] == ["w"]
+    assert "W" in warning.message
+
+
+def test_a_web_clip_ios_kept_out_of_reads_does_not_roll_back(tmp_path):
+    start = [[], [{"bundleIdentifier": "a"}, {"bundleIdentifier": "b"}]]
+    device = HiddenClipSpringBoard(start, _installed("a", "b"))
+    plan = _plan_from(start, [[{"bundleIdentifier": "b"}, {"bundleIdentifier": "a"}]])
+
+    result = run(apply_state(device, plan, backup_dir=tmp_path, timing=FAST))
+
+    assert result.status == APPLIED
+    warning = next(e for e in result.events if e.code == "webclips_added")
+    assert warning.data["ids"] == ["hidden-clip"]
+    assert "Home" in warning.message

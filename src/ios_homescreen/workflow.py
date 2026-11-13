@@ -10,7 +10,17 @@ from typing import Any, Protocol
 
 from .events import ERROR, WARNING, Event, EventSink, ignore
 from .snapshots import make_backup, timestamp
-from .state import PLAN_META_KEY, fingerprint, safe_payload, same_layout, save_plist
+from .state import (
+    PLAN_META_KEY,
+    ReadBack,
+    fingerprint,
+    item_id,
+    item_name,
+    iter_items,
+    match_readback,
+    safe_payload,
+    save_plist,
+)
 
 APPLIED = "applied"
 ROLLED_BACK = "rolled-back"
@@ -73,7 +83,10 @@ async def _timed(awaitable: Awaitable[Any], seconds: float, what: str) -> Any:
         raise WorkflowError(f"{what} did not finish within {seconds:g} s", code="timeout") from exc
 
 
-async def _verify(device: HomeScreen, target: Any, timing: Timing) -> bool:
+async def _verify(
+    device: HomeScreen, target: Any, timing: Timing, before: Any
+) -> tuple[ReadBack, Any] | None:
+    """The first re-read that holds ``target`` and how it matched, or ``None``."""
     attempts = max(1, timing.verify_attempts)
     for attempt in range(attempts):
         if attempt > 0 and timing.verify_interval:
@@ -84,9 +97,20 @@ async def _verify(device: HomeScreen, target: Any, timing: Timing) -> bool:
             # After a write, a failed read proves nothing either way. Keep trying;
             # without proof the caller rolls back.
             continue
-        if same_layout(current, target):
-            return True
-    return False
+        matched = match_readback(current, target, before=before)
+        if matched is not None:
+            return matched, current
+    return None
+
+
+def _names(state: Any, ids: tuple[str, ...]) -> str:
+    found: dict[str, str] = {}
+    for item in iter_items(state):
+        try:
+            found.setdefault(item_id(item), item_name(item))
+        except Exception:
+            continue
+    return ", ".join(found.get(ident, ident) for ident in ids)
 
 
 async def _write(device: HomeScreen, payload: dict[str, Any], seconds: float) -> bool:
@@ -163,8 +187,28 @@ async def apply_state(
             level=WARNING,
         )
 
+    def explain(matched: ReadBack, read: Any) -> None:
+        if matched.reflowed_widgets:
+            emit(
+                "widgets_reflowed",
+                "iOS moved widgets within their page to keep it packed: "
+                f"{_names(read, matched.reflowed_widgets)}.",
+                level=WARNING,
+                ids=list(matched.reflowed_widgets),
+            )
+        if matched.added_webclips:
+            emit(
+                "webclips_added",
+                "iOS put web clips on the home screen that it had not shown before: "
+                f"{_names(read, matched.added_webclips)}.",
+                level=WARNING,
+                ids=list(matched.added_webclips),
+            )
+
     emit("verifying", "Re-reading the layout to verify it...", 4)
-    if await _verify(device, payload, timing):
+    verified = await _verify(device, payload, timing, current)
+    if verified is not None:
+        explain(*verified)
         emit("verified", "Layout verified.", 5)
         return ApplyResult(APPLIED, backup, unconfirmed, False, tuple(events))
 
@@ -175,7 +219,9 @@ async def apply_state(
     )
     rollback = safe_payload(current, installed)
     rollback_unconfirmed = await _write(device, rollback, timing.write_timeout)
-    if await _verify(device, rollback, timing):
+    verified = await _verify(device, rollback, timing, current)
+    if verified is not None:
+        explain(*verified)
         emit(
             "rolled_back",
             "Rollback written and verified. The device is back to its previous layout.",

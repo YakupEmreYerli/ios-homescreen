@@ -10,8 +10,10 @@ from __future__ import annotations
 import hashlib
 import json
 import plistlib
+from collections import Counter
 from collections.abc import Iterable, Iterator, Mapping
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -344,6 +346,69 @@ def canonical(state: State) -> Any:
 
 def same_layout(left: State, right: State) -> bool:
     return canonical(left) == canonical(right)
+
+
+@dataclass(frozen=True)
+class ReadBack:
+    """How a read after a write holds what was written, when it does."""
+
+    reflowed_widgets: tuple[str, ...] = ()
+    """Widgets that iOS moved within their page to keep the grid packed."""
+    added_webclips: tuple[str, ...] = ()
+    """Web clips that iOS put on a page although no read had shown them before."""
+
+
+def _webclip_ids(canon: Any) -> set[str]:
+    found: set[str] = set()
+
+    def walk(node: Any) -> None:
+        if isinstance(node, tuple):
+            if len(node) == 2 and node[0] == "webclip" and isinstance(node[1], str):
+                found.add(node[1])
+            for inner in node:
+                walk(inner)
+
+    walk(canon)
+    return found
+
+
+def match_readback(read: State, target: State, *, before: State | None = None) -> ReadBack | None:
+    """Whether ``read`` holds ``target``; ``None`` when it does not.
+
+    Beyond an exact match, two things iOS does on its own are accepted (seen on iOS 27):
+    on a nearly full page SpringBoard may move a widget to keep the grid packed, and it
+    may put a web clip that ``getIconState`` never reported into a slot the write freed.
+    So a page may hold its widgets in another order, as long as everything else on it
+    keeps its order, and web clips that are neither in ``target`` nor in ``before`` (the
+    read before the write) are ignored. Any other difference fails.
+    """
+    got_dock, got_pages = canonical(read)
+    want = canonical(target)
+    want_dock, want_pages = want
+    known = _webclip_ids(want) | (_webclip_ids(canonical(before)) if before is not None else set())
+    added = sorted(_webclip_ids((got_dock, got_pages)) - known)
+
+    def keep(item: Any) -> bool:
+        return not (item[0] == "webclip" and item[1] in added)
+
+    got_dock = tuple(filter(keep, got_dock))
+    got_pages = tuple(tuple(filter(keep, page)) for page in got_pages)
+    if got_dock != want_dock or len(got_pages) != len(want_pages):
+        return None
+    reflowed: list[str] = []
+    for got, wanted in zip(got_pages, want_pages, strict=True):
+        if got == wanted:
+            continue
+        widgets = [item for item in got if item[0] == "widget"]
+        wanted_widgets = [item for item in wanted if item[0] == "widget"]
+        others = [item for item in got if item[0] != "widget"]
+        wanted_others = [item for item in wanted if item[0] != "widget"]
+        if others != wanted_others or Counter(widgets) != Counter(wanted_widgets):
+            return None
+        was_at = {item: index for index, item in enumerate(wanted) if item[0] == "widget"}
+        moved = [item for index, item in enumerate(got) if item in was_at and was_at[item] != index]
+        reflowed.extend(item[1] for item in moved)
+    return ReadBack(tuple(reflowed), tuple(added))
 
 
 def fingerprint(state: State) -> str:
