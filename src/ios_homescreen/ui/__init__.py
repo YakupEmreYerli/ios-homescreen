@@ -39,6 +39,8 @@ class Options:
     demo: bool = False
     showcase: Path | None = None
     """Show this layout file on the phone's wallpaper and icons, read-only."""
+    auto: bool = False
+    """Try USB first and fall back to Wi-Fi (the desktop app, which has no command line)."""
 
 
 def _require() -> None:
@@ -67,8 +69,17 @@ def _listen(port: int) -> socket.socket:
     return sock
 
 
-def serve(options: Options, *, say: Callable[[str], None] = print) -> int:
-    """Run the UI server until Ctrl+C. Returns an exit code."""
+def serve(
+    options: Options,
+    *,
+    say: Callable[[str], None] = print,
+    on_started: Callable[[str, Callable[[], None]], None] | None = None,
+) -> int:
+    """Run the UI server until Ctrl+C. Returns an exit code.
+
+    ``on_started(url, stop)`` is called once the server listens; ``stop()`` shuts it down
+    from any thread. The desktop app uses it to open its window and to stop with it.
+    """
     _require()
     import uvicorn
 
@@ -109,6 +120,7 @@ def serve(options: Options, *, say: Callable[[str], None] = print) -> int:
                     timing=options.timing,
                     transport=options.transport,
                     showcase=options.showcase,
+                    auto=options.auto,
                 )
             )
         app = create_app(session, token=token, port=port)
@@ -143,6 +155,12 @@ def serve(options: Options, *, say: Callable[[str], None] = print) -> int:
                 say("The address works for this run only. Press Ctrl+C to stop.")
                 if options.open_browser:
                     await asyncio.to_thread(webbrowser.open, url)
+                if on_started is not None:
+
+                    def stop() -> None:
+                        server.should_exit = True
+
+                    on_started(url, stop)
             await running
 
         logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")

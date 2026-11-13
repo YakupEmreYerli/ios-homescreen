@@ -7,6 +7,7 @@ exceptions are recognised by class name so that this module never imports it.
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Iterator
 from typing import Any
 
@@ -40,14 +41,54 @@ _WIFI_SETUP = [
     "Then restart the editor with `--wifi`.",
 ]
 
-# code -> (title, steps)
-_KNOWN: dict[str, tuple[str, list[str]]] = {
-    "no_usb_device": ("No iPhone found over USB", _USB_STEPS),
-    "usbmuxd_unreachable": (
+# The service that reaches a phone over USB: usbmuxd on Linux, built into macOS, and
+# Apple Mobile Device Service (from Apple Devices or iTunes) on Windows.
+if sys.platform == "darwin":
+    _NO_SERVICE = (
+        "The iPhone connection service did not answer",
+        [
+            "macOS runs it itself: unplug the iPhone, plug it in again and try again.",
+            "If it keeps failing, restart the Mac.",
+        ],
+    )
+    _RESTART = "If every attempt times out, unplug the iPhone and plug it in again."
+elif sys.platform == "win32":
+    _NO_SERVICE = (
+        "Apple Devices is not installed",
+        [
+            "Install Apple Devices from the Microsoft Store (iTunes works too): it brings the "
+            "service that talks to the iPhone.",
+            "Plug the iPhone in again, then try again.",
+        ],
+    )
+    _RESTART = (
+        "If every attempt times out, restart Apple Mobile Device Service (in Services), "
+        "then reconnect the phone."
+    )
+else:
+    _NO_SERVICE = (
         "usbmuxd is not running",
         [
             "Install usbmuxd from your distribution and start it: `sudo systemctl start usbmuxd`.",
             "Plug the iPhone in again, then try again.",
+        ],
+    )
+    _RESTART = (
+        "If every attempt times out, restart usbmuxd: `sudo systemctl restart usbmuxd`, "
+        "then reconnect the phone."
+    )
+
+# code -> (title, steps)
+_KNOWN: dict[str, tuple[str, list[str]]] = {
+    "no_usb_device": ("No iPhone found over USB", _USB_STEPS),
+    "usbmuxd_unreachable": _NO_SERVICE,
+    "no_device": (
+        "No iPhone found",
+        [
+            "Plug the iPhone in with a cable that carries data and unlock it.",
+            "Over Wi-Fi it has to be awake, unlocked and on the same network, and it must "
+            "have been connected with a cable and set up for Wi-Fi once.",
+            "Try again.",
         ],
     ),
     "not_trusted": ("This computer is not trusted yet", _TRUST_STEPS),
@@ -86,15 +127,15 @@ _KNOWN: dict[str, tuple[str, list[str]]] = {
         [
             "Unlock the iPhone and keep it awake.",
             "If it shows Trust This Computer, tap Trust.",
-            "If every attempt times out, restart usbmuxd: "
-            "`sudo systemctl restart usbmuxd`, then reconnect the phone.",
+            _RESTART,
         ],
     ),
     "connection_failed": (
         "Could not connect to the iPhone",
         [
             "Unlock the iPhone and check the cable or the network.",
-            "Try again. If it keeps failing, restart usbmuxd: `sudo systemctl restart usbmuxd`.",
+            "Try again.",
+            _RESTART,
         ],
     ),
     "layout_changed": (
