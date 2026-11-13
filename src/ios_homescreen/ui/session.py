@@ -49,6 +49,9 @@ log = logging.getLogger(__name__)
 ICON_BATCH = 16
 WIFI_RETRY_CODES = frozenset({"not_advertising", "timeout"})
 WIFI_RETRY_DISCOVERY = 12.0
+# Codes that mean "not over this transport" rather than "something is wrong with it".
+USB_ABSENT_CODES = frozenset({"no_usb_device", "usbmuxd_unreachable"})
+WIFI_ABSENT_CODES = frozenset({"not_advertising", "timeout", "no_pair_record"})
 MAX_BACKUPS = 100
 
 Opener = Callable[[Callable[[Event], None]], Awaitable[Any]]
@@ -173,6 +176,8 @@ class Settings:
     showcase: Path | None = None
     """``editor --showcase``: show this layout file, read-only (see :mod:`.showcase`)."""
     """Root of the icon cache; ``None`` uses the XDG cache directory."""
+    auto: bool = False
+    """Try USB first, then Wi-Fi: the desktop app, where nobody picks a transport."""
 
 
 def _special_ids(state: Any, kinds: Iterable[str]) -> list[str]:
@@ -248,21 +253,25 @@ class Session:
         """Devices that did not send a wallpaper this session; they are not asked again."""
         self._own_wallpaper = False
         self.draft_view: dict[str, Any] | None = None
+        self._wifi_used = False
         self._backup_details: dict[tuple[str, int, int], Any] = {}
 
     # ------------------------------------------------------------------ connection
 
     def connection(self) -> dict[str, Any]:
         transport = self.settings.transport
-        if self.settings.demo or transport is None:
+        if self.settings.demo or (transport is None and not self.settings.auto):
             return {"kind": "demo", "label": "Demo"}
-        if transport.wifi:
+        wifi = self._wifi_used if self.settings.auto else bool(transport and transport.wifi)
+        if wifi:
             return {"kind": "wifi", "label": "Wi-Fi"}
         return {"kind": "usb", "label": "USB"}
 
     async def _connect(self, emit: Callable[[Event], None]) -> Any:
         if self._opener is not None:
             device = await self._opener(emit)
+        elif self.settings.auto:
+            device = await self._open_any(emit)
         else:
             device = await self._open(self.settings.transport or Transport(), emit)
         if self.settings.showcase is not None:
@@ -292,6 +301,28 @@ class Session:
             transport, discovery_timeout=max(WIFI_RETRY_DISCOVERY, transport.discovery_timeout * 2)
         )
         return await api.connect(longer, on_event=emit, backend=self._backend)
+
+    async def _open_any(self, emit: Callable[[Event], None]) -> Any:
+        """USB when a cable is in, otherwise Wi-Fi."""
+        usb = self.settings.transport or Transport()
+        try:
+            device = await self._open(replace(usb, wifi=False), emit)
+            self._wifi_used = False
+            return device
+        except TransportError as exc:
+            if exc.code not in USB_ABSENT_CODES:
+                raise
+        emit(Event("trying_wifi", "No iPhone over USB; looking on the network..."))
+        try:
+            device = await self._open(replace(usb, wifi=True), emit)
+        except TransportError as exc:
+            if exc.code not in WIFI_ABSENT_CODES:
+                raise
+            raise TransportError(
+                "no iPhone found over USB or on the network", code="no_device"
+            ) from exc
+        self._wifi_used = True
+        return device
 
     async def _release_icons(self) -> None:
         """Stop a background icon fetch so a job can use the phone."""

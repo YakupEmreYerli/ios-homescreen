@@ -34,6 +34,14 @@ ui = [
   "starlette>=0.40",
   "uvicorn>=0.30",
 ]
+# The desktop app (`ios-homescreen-app`): the editor in its own window. pywebview uses the
+# system web view on macOS (WebKit) and Windows (WebView2); Linux gets Qt's.
+app = [
+  "starlette>=0.40",
+  "uvicorn>=0.30",
+  "pywebview>=5.4; sys_platform != 'linux'",
+  "pywebview[qt]>=5.4; sys_platform == 'linux'",
+]
 
 [project.urls]
 Homepage = "https://github.com/YakupEmreYerli/ios-homescreen"
@@ -42,11 +50,19 @@ Issues = "https://github.com/YakupEmreYerli/ios-homescreen/issues"
 [project.scripts]
 ios-homescreen = "ios_homescreen.cli:main"
 
+[project.gui-scripts]
+ios-homescreen-app = "ios_homescreen.desktop:main"
+
 [dependency-groups]
 dev = [
   "httpx2>=2.13",
   "pytest>=8.3",
   "ruff>=0.15",
+]
+# Building the desktop app (.github/workflows/apps.yml, packaging/).
+package = [
+  "pyinstaller>=6.11",
+  "pillow>=11",
 ]
 
 [build-system]

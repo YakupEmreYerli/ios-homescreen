@@ -22,7 +22,7 @@ HOME = Path("/home/someone")
     ],
 )
 def test_data_dir_follows_xdg(env, expected):
-    assert data_dir(env, home=HOME) == expected
+    assert data_dir(env, home=HOME, platform="linux") == expected
 
 
 @pytest.mark.parametrize(
@@ -35,7 +35,36 @@ def test_data_dir_follows_xdg(env, expected):
     ],
 )
 def test_cache_dir_follows_xdg(env, expected):
-    assert cache_dir(env, home=HOME) == expected
+    assert cache_dir(env, home=HOME, platform="linux") == expected
+
+
+@pytest.mark.parametrize(
+    ("platform", "env", "data", "cache"),
+    [
+        (
+            "darwin",
+            {"XDG_DATA_HOME": "/data"},
+            HOME / "Library/Application Support/ios-homescreen",
+            HOME / "Library/Caches/ios-homescreen",
+        ),
+        (
+            "win32",
+            {"LOCALAPPDATA": "/appdata"},
+            Path("/appdata/ios-homescreen"),
+            Path("/appdata/ios-homescreen/Cache"),
+        ),
+        (
+            "win32",
+            {},
+            HOME / "AppData/Local/ios-homescreen",
+            HOME / "AppData/Local/ios-homescreen/Cache",
+        ),
+    ],
+)
+def test_macos_and_windows_use_their_own_folders(platform, env, data, cache):
+    assert data_dir(env, home=HOME, platform=platform) == data
+    assert cache_dir(env, home=HOME, platform=platform) == cache
+    assert data_dir({"IOS_HOMESCREEN_DATA_DIR": "/x"}, platform=platform) == Path("/x")
 
 
 def test_icon_cache_stores_by_identifier_and_refuses_unsafe_names(tmp_path):
