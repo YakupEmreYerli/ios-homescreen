@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import Awaitable, Callable, Iterable, Mapping
+from dataclasses import replace
 from typing import Any
 
 from .events import EventSink, ignore
@@ -112,6 +113,7 @@ class Device:
         springboard_factory: Callable[[Any], Any] | None = None,
         installer_factory: Callable[[Any], Any] | None = None,
         marketing_name: str | None = None,
+        reconnect: Callable[[], Awaitable[Device]] | None = None,
         read_timeout: float = READ_TIMEOUT,
         send_timeout: float = SEND_TIMEOUT,
         reply_timeout: float = REPLY_TIMEOUT,
@@ -122,6 +124,7 @@ class Device:
         self._close = close
         self._springboard_factory = springboard_factory or _springboard
         self._installer_factory = installer_factory or _installer
+        self._reconnect = reconnect
         self.read_timeout = read_timeout
         self.send_timeout = send_timeout
         self.reply_timeout = reply_timeout
@@ -154,6 +157,24 @@ class Device:
             raise DeviceError(f"{what} failed: {exc}") from exc
 
     async def _read(self, format_version: str) -> Any:
+        try:
+            return await self._read_once(format_version)
+        except DeviceError:
+            if self._reconnect is None:
+                raise
+        # A home screen write can drop the whole Wi-Fi tunnel, not just one service:
+        # open a new one to the same iPhone and read once more.
+        udid = self.info["udid"]
+        await self.close()
+        fresh = await self._reconnect()
+        if not udid or fresh.info["udid"] != udid:
+            await fresh.close()
+            raise DeviceError("reconnected to a different iPhone", code="device_changed")
+        self.lockdown, self._close = fresh.lockdown, fresh._close
+        self.marketing_name = fresh.marketing_name or self.marketing_name
+        return await self._read_once(format_version)
+
+    async def _read_once(self, format_version: str) -> Any:
         service = self._springboard_factory(self.lockdown)
 
         async def run() -> Any:
@@ -355,6 +376,15 @@ async def open_device(
 ) -> Device:
     """Connect over ``transport`` and return a :class:`Device`. Close it when done."""
     link = await connect(transport, backend=backend, on_event=on_event)
-    return Device(
+    device = Device(
         link.provider, close=link.close, transport=link.kind, marketing_name=link.marketing_name
     )
+    udid = device.info["udid"]
+    if transport.wifi and udid:
+        same_phone = replace(transport, udid=udid)
+
+        async def reconnect() -> Device:
+            return await open_device(same_phone, on_event=on_event, backend=backend)
+
+        device._reconnect = reconnect
+    return device

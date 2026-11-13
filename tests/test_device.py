@@ -291,6 +291,61 @@ def test_close_closes_the_lockdown_connection():
     assert device.lockdown.closed
 
 
+# ------------------------------------------------------------------ Wi-Fi reconnect
+
+
+class DroppedService(FakeService):
+    """A service on a tunnel that a write took down: every read fails."""
+
+    async def get_icon_state(self, format_version="2"):
+        raise ConnectionResetError("tunnel closed")
+
+
+def _reconnecting(fresh_lockdown):
+    calls = []
+
+    async def reconnect():
+        calls.append(1)
+        return Device(fresh_lockdown)
+
+    device = Device(
+        FakeLockdown(),
+        springboard_factory=lambda lockdown: (
+            FakeService() if lockdown is fresh_lockdown else DroppedService()
+        ),
+        reconnect=reconnect,
+    )
+    return device, calls
+
+
+def test_a_failed_read_reopens_the_connection_to_the_same_iphone():
+    fresh = FakeLockdown()
+    device, calls = _reconnecting(fresh)
+
+    assert run(device.read_state()) == [[{"bundleIdentifier": "fv2"}]]
+    assert calls == [1]
+    assert device.lockdown is fresh
+
+
+def test_reconnecting_to_a_different_iphone_is_refused():
+    other = FakeLockdown()
+    other.all_values["UniqueDeviceID"] = "00008120-FFFFFFFFFFFFFFFF"
+    device, _ = _reconnecting(other)
+
+    with pytest.raises(DeviceError, match="different iPhone") as error:
+        run(device.read_state())
+
+    assert error.value.code == "device_changed"
+    assert other.closed
+
+
+def test_without_a_reconnect_a_failed_read_is_an_error():
+    device = _device(DroppedService())
+
+    with pytest.raises(DeviceError, match="tunnel closed"):
+        run(device.read_state())
+
+
 # ------------------------------------------------------------------ the device's name
 
 
